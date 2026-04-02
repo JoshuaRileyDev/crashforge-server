@@ -10,8 +10,8 @@ if [ -n "${DATABASE_URL:-}" ]; then
 const { Client } = require("pg");
 
 const connectionString = process.env.DATABASE_URL;
-const maxAttempts = 60;
-const sleepMs = 1000;
+const maxAttempts = Number(process.env.DB_WAIT_MAX_ATTEMPTS || 180);
+const sleepMs = Number(process.env.DB_WAIT_INTERVAL_MS || 1000);
 
 function sleep(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
@@ -23,24 +23,35 @@ async function canConnect() {
     await client.connect();
     await client.query("SELECT 1");
     await client.end();
-    return true;
-  } catch {
+    return { ok: true };
+  } catch (error) {
     try { await client.end(); } catch {}
-    return false;
+    return {
+      ok: false,
+      error: error && error.message ? String(error.message) : String(error),
+      code: error && error.code ? String(error.code) : undefined,
+    };
   }
 }
 
 (async () => {
+  let lastError;
   for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
-    const ok = await canConnect();
-    if (ok) {
+    const result = await canConnect();
+    if (result.ok) {
       console.log("[CrashForge] PostgreSQL is ready.");
       process.exit(0);
     }
-    console.log(`[CrashForge] PostgreSQL not ready (${attempt}/${maxAttempts}), retrying...`);
+    lastError = result;
+    const suffix = result.code ? ` code=${result.code}` : "";
+    console.log(`[CrashForge] PostgreSQL not ready (${attempt}/${maxAttempts})${suffix}: ${result.error}`);
     await sleep(sleepMs);
   }
-  console.error("[CrashForge] PostgreSQL did not become ready in time.");
+  if (lastError) {
+    const suffix = lastError.code ? ` code=${lastError.code}` : "";
+    console.error(`[CrashForge] Last PostgreSQL error${suffix}: ${lastError.error}`);
+  }
+  console.error(`[CrashForge] PostgreSQL did not become ready in time after ${maxAttempts} attempts.`);
   process.exit(1);
 })();
 NODE
