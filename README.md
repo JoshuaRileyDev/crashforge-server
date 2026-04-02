@@ -21,8 +21,7 @@ CrashForge Server ingests iOS crash payloads, symbolicates them with uploaded dS
 
 This README is for the server repository only.
 
-- Swift SDK docs live in [`swift-sdk/README.md`](./swift-sdk/README.md) while this is still a combined workspace.
-- To split into two repos, use [`REPO_SPLIT_GUIDE.md`](./REPO_SPLIT_GUIDE.md).
+- Swift SDK repo: `https://github.com/JoshuaRileyDev/crashforge-ios-sdk`
 
 ## Requirements
 
@@ -54,14 +53,28 @@ UI:
 
 ## Docker + Postgres
 
+Bring up both services:
+
 ```bash
 docker compose up -d --build
+```
+
+If you changed `.env`, restart with:
+
+```bash
+docker compose up -d --build --force-recreate
 ```
 
 Ports:
 
 - API: `http://localhost:3000`
-- Postgres: `localhost:5433`
+- Postgres host port: `localhost:56432` (customizable via `POSTGRES_HOST_PORT`)
+
+Notes:
+
+- The server container now waits for PostgreSQL readiness before starting.
+- Inside Docker Compose, server DB host is `postgres` (not `127.0.0.1`).
+- If you set `DATABASE_URL` manually, do not use `127.0.0.1` unless the DB is in the same container (it is not).
 
 ## API reference
 
