@@ -1,0 +1,16 @@
+node_modules/
+dist/
+.DS_Store
+.env
+swift-sdk/.build/
+.swiftpm/
+**/xcuserdata/
+**/*.xcuserstate
+data/uploads/*
+data/dsyms/*
+data/sources/*
+data/crashes/*
+!data/uploads/.gitkeep
+!data/dsyms/.gitkeep
+!data/sources/.gitkeep
+!data/crashes/.gitkeep

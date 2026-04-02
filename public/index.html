@@ -1,0 +1,289 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Crash Reporter Live Feed</title>
+    <style>
+      :root {
+        --bg: #0b1220;
+        --panel: #121b2e;
+        --panel-2: #1a2540;
+        --text: #e7edf9;
+        --muted: #95a3bf;
+        --danger: #ff6b6b;
+        --ok: #34d399;
+      }
+      * { box-sizing: border-box; }
+      body {
+        margin: 0;
+        background: radial-gradient(circle at 10% 10%, #1e2a44 0%, var(--bg) 45%);
+        color: var(--text);
+        font-family: ui-sans-serif, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      }
+      .container {
+        width: min(1200px, 94vw);
+        margin: 28px auto 56px;
+      }
+      h1 {
+        margin: 0 0 8px;
+        font-size: clamp(24px, 3vw, 34px);
+      }
+      .sub { color: var(--muted); margin-bottom: 16px; }
+      .status {
+        display: inline-flex;
+        align-items: center;
+        gap: 8px;
+        padding: 8px 12px;
+        border: 1px solid #2b3a5b;
+        border-radius: 999px;
+        background: rgba(17, 25, 44, 0.85);
+        color: var(--muted);
+        margin-bottom: 18px;
+      }
+      .toolbar {
+        display: flex;
+        gap: 10px;
+        align-items: center;
+        margin-bottom: 14px;
+      }
+      .btn {
+        display: inline-block;
+        text-decoration: none;
+        color: #d9e7ff;
+        border: 1px solid #38507f;
+        background: #17233d;
+        padding: 8px 12px;
+        border-radius: 10px;
+        font-size: 13px;
+      }
+      .btn:hover {
+        background: #203155;
+      }
+      .dot {
+        width: 10px;
+        height: 10px;
+        border-radius: 50%;
+        background: var(--danger);
+      }
+      .dot.connected { background: var(--ok); }
+      .grid { display: grid; gap: 12px; }
+      .card {
+        background: linear-gradient(180deg, var(--panel), var(--panel-2));
+        border: 1px solid #293857;
+        border-radius: 12px;
+        padding: 14px;
+      }
+      .row {
+        display: flex;
+        justify-content: space-between;
+        gap: 12px;
+        flex-wrap: wrap;
+        margin-bottom: 6px;
+      }
+      .pill {
+        display: inline-block;
+        padding: 4px 8px;
+        border-radius: 999px;
+        border: 1px solid #355185;
+        color: #c5d7ff;
+        font-size: 12px;
+      }
+      .meta { color: var(--muted); font-size: 13px; }
+      .line {
+        margin-top: 8px;
+        font-size: 13px;
+        color: #cde5ff;
+        word-break: break-word;
+      }
+      .section {
+        margin-top: 10px;
+        border-top: 1px solid #27344f;
+        padding-top: 10px;
+      }
+      .section h3 {
+        margin: 0 0 6px;
+        font-size: 12px;
+        letter-spacing: 0.06em;
+        text-transform: uppercase;
+        color: #94b1db;
+      }
+      pre {
+        margin: 0;
+        padding: 10px;
+        border-radius: 8px;
+        background: #0d1528;
+        border: 1px solid #2b3a57;
+        color: #d5e2ff;
+        overflow: auto;
+        white-space: pre-wrap;
+        word-break: break-word;
+        max-height: 360px;
+      }
+      .empty {
+        border: 1px dashed #355185;
+        border-radius: 12px;
+        padding: 20px;
+        color: var(--muted);
+        text-align: center;
+      }
+      .mono { font-family: ui-monospace, Menlo, Consolas, monospace; }
+    </style>
+  </head>
+  <body>
+    <main class="container">
+      <h1>Crash Reporter Full Output</h1>
+      <div class="sub">Showing full payload, raw report, and all symbolicated frames. Streaming from <code>/v1/crashes/stream</code>.</div>
+      <div class="toolbar">
+        <a class="btn" href="/settings">Settings</a>
+        <div class="status"><span class="dot" id="dot"></span><span id="state">Connecting…</span></div>
+      </div>
+      <section class="grid" id="list"></section>
+    </main>
+
+    <script>
+      const listEl = document.getElementById("list");
+      const stateEl = document.getElementById("state");
+      const dotEl = document.getElementById("dot");
+      const maxItems = 50;
+
+      function setState(text, connected) {
+        stateEl.textContent = text;
+        dotEl.classList.toggle("connected", connected);
+      }
+
+      function escapeHtml(value) {
+        return String(value)
+          .replaceAll("&", "&amp;")
+          .replaceAll("<", "&lt;")
+          .replaceAll(">", "&gt;")
+          .replaceAll('"', "&quot;")
+          .replaceAll("'", "&#039;");
+      }
+
+      function formatDate(iso) {
+        const d = new Date(iso);
+        return Number.isNaN(d.getTime()) ? iso : d.toLocaleString();
+      }
+
+      function isUsefulFrameLine(text) {
+        if (!text) return false;
+        if (text.includes("/<compiler-generated>:0")) return false;
+        if (text.startsWith("0x")) return false;
+        return true;
+      }
+
+      function pickBestFrame(frames) {
+        if (!Array.isArray(frames) || frames.length === 0) return null;
+        for (const frame of frames) {
+          if (frame.symbolicated && frame.symbolicated.includes(".swift:")) {
+            return frame.symbolicated;
+          }
+        }
+        for (const frame of frames) {
+          if (isUsefulFrameLine(frame.symbolicated)) return frame.symbolicated;
+        }
+        return frames[0].symbolicated || frames[0].symbol || `${frames[0].imageName} ${frames[0].address}`;
+      }
+
+      function renderFrames(frames) {
+        if (!Array.isArray(frames) || frames.length === 0) return "<none>";
+        return frames
+          .map((frame) => {
+            const line = frame.symbolicated || frame.symbol || `${frame.imageName} ${frame.address}`;
+            return `${String(frame.index ?? "?").padStart(3, " ")} | ${line}`;
+          })
+          .join("\n");
+      }
+
+      function renderRecord(record) {
+        const payload = record.payload || {};
+        const frames = Array.isArray(record.symbolicatedFrames) ? record.symbolicatedFrames : [];
+        const bestFrame = pickBestFrame(frames);
+        const rawReport = payload.rawReport || "<empty>";
+        const reason = payload.terminationReason ? `<div class=\"meta\">Reason: ${escapeHtml(payload.terminationReason)}</div>` : "";
+
+        return `
+          <article class="card" data-id="${escapeHtml(record.id)}">
+            <div class="row">
+              <div><span class="pill">${escapeHtml(payload.exceptionType || "UNKNOWN")}</span></div>
+              <div class="meta">${escapeHtml(formatDate(record.receivedAt))}</div>
+            </div>
+            <div class="meta">App: ${escapeHtml(payload.appId || "unknown")} • Build: ${escapeHtml(payload.buildVersion || "unknown")} • Frames: ${escapeHtml(frames.length)}</div>
+            ${reason}
+            <div class="line"><strong>Best App Frame:</strong> ${escapeHtml(bestFrame || "<none>")}</div>
+
+            <div class="section">
+              <h3>Raw Report</h3>
+              <pre class="mono">${escapeHtml(rawReport)}</pre>
+            </div>
+
+            <div class="section">
+              <h3>All Symbolicated Frames</h3>
+              <pre class="mono">${escapeHtml(renderFrames(frames))}</pre>
+            </div>
+
+            <div class="section">
+              <h3>Payload JSON</h3>
+              <pre class="mono">${escapeHtml(JSON.stringify(payload, null, 2))}</pre>
+            </div>
+          </article>
+        `;
+      }
+
+      function upsertRecord(record) {
+        if (!record || !record.id) return;
+        const existing = listEl.querySelector(`[data-id="${CSS.escape(record.id)}"]`);
+        if (existing) existing.remove();
+        listEl.insertAdjacentHTML("afterbegin", renderRecord(record));
+        while (listEl.children.length > maxItems) {
+          listEl.lastElementChild.remove();
+        }
+      }
+
+      async function fetchCrashById(id) {
+        const response = await fetch(`/v1/crashes/${encodeURIComponent(id)}`);
+        if (!response.ok) throw new Error(`Failed to load crash ${id}`);
+        const data = await response.json();
+        return data.record;
+      }
+
+      async function loadRecent() {
+        try {
+          const response = await fetch("/v1/crashes?limit=20&full=1");
+          const data = await response.json();
+          if (!Array.isArray(data.records) || data.records.length === 0) {
+            listEl.innerHTML = '<div class="empty">No crashes yet. Trigger one from the app to see live updates.</div>';
+            return;
+          }
+          listEl.innerHTML = data.records.map(renderRecord).join("");
+        } catch (error) {
+          listEl.innerHTML = `<div class="empty">Failed to load crashes: ${escapeHtml(error.message || error)}</div>`;
+        }
+      }
+
+      function connect() {
+        const stream = new EventSource("/v1/crashes/stream");
+        stream.addEventListener("ready", () => setState("Connected", true));
+        stream.addEventListener("crash", async (event) => {
+          try {
+            const payload = JSON.parse(event.data);
+            const record = await fetchCrashById(payload.id);
+            if (listEl.querySelector(".empty")) {
+              listEl.innerHTML = "";
+            }
+            upsertRecord(record);
+          } catch (error) {
+            console.error("Failed to process crash event", error);
+          }
+        });
+        stream.onerror = () => {
+          setState("Reconnecting…", false);
+        };
+      }
+
+      loadRecent();
+      connect();
+    </script>
+  </body>
+</html>

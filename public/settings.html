@@ -1,0 +1,387 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Settings</title>
+    <style>
+      :root {
+        --bg: #0b1220;
+        --panel: #121b2e;
+        --panel-2: #1a2540;
+        --text: #e7edf9;
+        --muted: #95a3bf;
+      }
+      * { box-sizing: border-box; }
+      body {
+        margin: 0;
+        background: radial-gradient(circle at 10% 10%, #1e2a44 0%, var(--bg) 45%);
+        color: var(--text);
+        font-family: ui-sans-serif, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      }
+      .container {
+        width: min(1220px, 94vw);
+        margin: 26px auto 60px;
+      }
+      h1 { margin: 0 0 8px; }
+      .sub { color: var(--muted); margin-bottom: 14px; }
+      .toolbar { display: flex; gap: 10px; margin-bottom: 14px; }
+      .btn {
+        border: 1px solid #38507f;
+        background: #17233d;
+        color: #dce8ff;
+        border-radius: 10px;
+        padding: 8px 12px;
+        font-size: 13px;
+        cursor: pointer;
+        text-decoration: none;
+      }
+      .layout {
+        display: grid;
+        gap: 12px;
+      }
+      .panel {
+        background: linear-gradient(180deg, var(--panel), var(--panel-2));
+        border: 1px solid #293857;
+        border-radius: 12px;
+        padding: 12px;
+      }
+      .panel h2 {
+        margin: 0 0 10px;
+        font-size: 17px;
+      }
+      .row2 {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 10px;
+      }
+      label {
+        display: grid;
+        gap: 6px;
+        font-size: 13px;
+      }
+      input, select, textarea {
+        width: 100%;
+        border: 1px solid #33517c;
+        background: #0f1a2f;
+        color: #e8efff;
+        border-radius: 8px;
+        padding: 8px 10px;
+        font-size: 13px;
+      }
+      textarea {
+        min-height: 80px;
+        resize: vertical;
+        font-family: ui-monospace, Menlo, Consolas, monospace;
+      }
+      table {
+        width: 100%;
+        border-collapse: collapse;
+        font-size: 13px;
+      }
+      th, td {
+        border-bottom: 1px solid #2b3a57;
+        padding: 8px 6px;
+        text-align: left;
+      }
+      .mono { font-family: ui-monospace, Menlo, Consolas, monospace; }
+      .muted { color: var(--muted); }
+      .warn { color: #f59e0b; }
+      @media (max-width: 900px) {
+        .row2 { grid-template-columns: 1fr; }
+      }
+    </style>
+  </head>
+  <body>
+    <main class="container">
+      <h1>Settings</h1>
+      <div class="sub">Configure LLM + GitHub automation, app-to-repo mappings, webhook rules, and auto-fix run status.</div>
+      <div class="toolbar">
+        <a class="btn" href="/">Back To Crashes</a>
+        <a class="btn" href="/logs">Live Logs</a>
+      </div>
+
+      <section class="layout">
+        <article class="panel">
+          <h2>Agent Automation</h2>
+          <form id="settingsForm">
+            <div class="row2">
+              <label>
+                Auto-fix Enabled
+                <select name="autoFixEnabled">
+                  <option value="false">false</option>
+                  <option value="true">true</option>
+                </select>
+              </label>
+              <label>
+                LLM Model
+                <input name="llmModel" placeholder="gpt-5.4" />
+              </label>
+            </div>
+            <div class="row2">
+              <label>
+                OpenAI-Compatible Base URL
+                <input name="llmBaseUrl" placeholder="https://api.openai.com/v1" />
+              </label>
+              <label>
+                LLM API Key
+                <input name="llmApiKey" type="password" placeholder="sk-..." />
+              </label>
+            </div>
+            <div class="row2">
+              <label>
+                GitHub Access Token (private repos)
+                <input name="githubToken" type="password" placeholder="ghp_..." />
+              </label>
+              <label>
+                Default Base Branch
+                <input name="defaultBaseBranch" placeholder="main" />
+              </label>
+            </div>
+            <div class="row2">
+              <label>
+                Fix Branch Prefix
+                <input name="fixBranchPrefix" placeholder="crash-fix" />
+              </label>
+              <label>
+                Git Author (optional)
+                <input name="gitUserName" placeholder="Crash Bot" />
+              </label>
+            </div>
+            <div class="row2">
+              <label>
+                Git Author Email (optional)
+                <input name="gitUserEmail" placeholder="bot@example.com" />
+              </label>
+            </div>
+            <div class="toolbar">
+              <button class="btn" type="submit">Save Settings</button>
+            </div>
+          </form>
+          <div id="settingsToast" class="muted"></div>
+        </article>
+
+        <article class="panel">
+          <h2>App ID → Repo Mapping</h2>
+          <form id="mappingForm">
+            <div class="row2">
+              <label>
+                App ID (bundle id)
+                <input name="appId" placeholder="com.example.CrashDemoApp" required />
+              </label>
+              <label>
+                GitHub Repo URL
+                <input name="repoUrl" placeholder="https://github.com/org/private-repo.git" required />
+              </label>
+            </div>
+            <div class="row2">
+              <label>
+                PR Base Branch
+                <input name="baseBranch" placeholder="main" />
+              </label>
+              <label>
+                Active
+                <select name="isActive">
+                  <option value="true">true</option>
+                  <option value="false">false</option>
+                </select>
+              </label>
+            </div>
+            <div class="toolbar">
+              <button class="btn" type="submit">Save Mapping</button>
+            </div>
+          </form>
+
+          <table>
+            <thead>
+              <tr>
+                <th>App ID</th>
+                <th>Repo</th>
+                <th>Base</th>
+                <th>Active</th>
+                <th></th>
+              </tr>
+            </thead>
+            <tbody id="mappingsBody"></tbody>
+          </table>
+        </article>
+
+        <article class="panel">
+          <h2>Webhook Rules</h2>
+          <div class="sub">Configure per-app webhook destinations with dynamic templates.</div>
+          <a class="btn" href="/webhooks">Open Webhook Rules Editor</a>
+        </article>
+
+        <article class="panel">
+          <h2>Auto-fix Runs</h2>
+          <div class="sub">Recent automated run status. PR URL appears when successful.</div>
+          <table>
+            <thead>
+              <tr>
+                <th>Time</th>
+                <th>App ID</th>
+                <th>Status</th>
+                <th>Message</th>
+                <th>Branch</th>
+                <th>PR</th>
+              </tr>
+            </thead>
+            <tbody id="runsBody"></tbody>
+          </table>
+        </article>
+      </section>
+    </main>
+
+    <script>
+      const settingsForm = document.getElementById("settingsForm");
+      const mappingForm = document.getElementById("mappingForm");
+      const settingsToast = document.getElementById("settingsToast");
+      const mappingsBody = document.getElementById("mappingsBody");
+      const runsBody = document.getElementById("runsBody");
+
+      function field(form, name) {
+        return form.elements.namedItem(name);
+      }
+
+      function escapeHtml(value) {
+        return String(value ?? "")
+          .replaceAll("&", "&amp;")
+          .replaceAll("<", "&lt;")
+          .replaceAll(">", "&gt;")
+          .replaceAll('"', "&quot;")
+          .replaceAll("'", "&#039;");
+      }
+
+      function formatDate(iso) {
+        const d = new Date(iso);
+        return Number.isNaN(d.getTime()) ? iso : d.toLocaleString();
+      }
+
+      async function loadSettings() {
+        const response = await fetch("/v1/settings");
+        const data = await response.json();
+        const s = data.settings || {};
+        field(settingsForm, "autoFixEnabled").value = String(Boolean(s.autoFixEnabled));
+        field(settingsForm, "llmBaseUrl").value = s.llmBaseUrl || "";
+        field(settingsForm, "llmApiKey").value = s.llmApiKey || "";
+        field(settingsForm, "llmModel").value = s.llmModel || "";
+        field(settingsForm, "githubToken").value = s.githubToken || "";
+        field(settingsForm, "gitUserName").value = s.gitUserName || "";
+        field(settingsForm, "gitUserEmail").value = s.gitUserEmail || "";
+        field(settingsForm, "defaultBaseBranch").value = s.defaultBaseBranch || "main";
+        field(settingsForm, "fixBranchPrefix").value = s.fixBranchPrefix || "crash-fix";
+      }
+
+      async function loadMappings() {
+        const response = await fetch("/v1/app-repo-mappings");
+        const data = await response.json();
+        const mappings = Array.isArray(data.mappings) ? data.mappings : [];
+        if (!mappings.length) {
+          mappingsBody.innerHTML = '<tr><td colspan="5" class="muted">No mappings configured</td></tr>';
+          return;
+        }
+        mappingsBody.innerHTML = mappings
+          .map((m) => `
+            <tr>
+              <td class="mono">${escapeHtml(m.appId)}</td>
+              <td class="mono">${escapeHtml(m.repoUrl)}</td>
+              <td>${escapeHtml(m.baseBranch)}</td>
+              <td>${escapeHtml(String(m.isActive))}</td>
+              <td><button class="btn" data-delete="${escapeHtml(m.id)}">Delete</button></td>
+            </tr>
+          `)
+          .join("");
+
+        for (const btn of mappingsBody.querySelectorAll("button[data-delete]")) {
+          btn.addEventListener("click", async () => {
+            const id = btn.getAttribute("data-delete");
+            if (!id) return;
+            if (!confirm("Delete this mapping?")) return;
+            await fetch(`/v1/app-repo-mappings/${encodeURIComponent(id)}`, { method: "DELETE" });
+            await loadMappings();
+          });
+        }
+      }
+
+      async function loadRuns() {
+        const response = await fetch("/v1/auto-fix-runs?limit=40");
+        const data = await response.json();
+        const runs = Array.isArray(data.runs) ? data.runs : [];
+        if (!runs.length) {
+          runsBody.innerHTML = '<tr><td colspan="6" class="muted">No runs yet</td></tr>';
+          return;
+        }
+
+        runsBody.innerHTML = runs
+          .map((r) => `
+            <tr>
+              <td>${escapeHtml(formatDate(r.createdAt))}</td>
+              <td class="mono">${escapeHtml(r.appId)}</td>
+              <td>${escapeHtml(r.status)}</td>
+              <td>${escapeHtml(r.message || "")}</td>
+              <td class="mono">${escapeHtml(r.branchName || "")}</td>
+              <td>${r.prUrl ? `<a href="${escapeHtml(r.prUrl)}" target="_blank">PR</a>` : ""}</td>
+            </tr>
+          `)
+          .join("");
+      }
+
+      settingsForm.addEventListener("submit", async (event) => {
+        event.preventDefault();
+        const payload = {
+          autoFixEnabled: field(settingsForm, "autoFixEnabled").value === "true",
+          llmBaseUrl: field(settingsForm, "llmBaseUrl").value.trim(),
+          llmApiKey: field(settingsForm, "llmApiKey").value,
+          llmModel: field(settingsForm, "llmModel").value.trim(),
+          githubToken: field(settingsForm, "githubToken").value,
+          gitUserName: field(settingsForm, "gitUserName").value.trim(),
+          gitUserEmail: field(settingsForm, "gitUserEmail").value.trim(),
+          defaultBaseBranch: field(settingsForm, "defaultBaseBranch").value.trim(),
+          fixBranchPrefix: field(settingsForm, "fixBranchPrefix").value.trim(),
+        };
+        const response = await fetch("/v1/settings", {
+          method: "PUT",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(payload),
+        });
+        if (!response.ok) {
+          settingsToast.textContent = "Failed to save settings";
+          settingsToast.className = "warn";
+          return;
+        }
+        settingsToast.textContent = "Settings saved";
+        settingsToast.className = "muted";
+        await loadSettings();
+      });
+
+      mappingForm.addEventListener("submit", async (event) => {
+        event.preventDefault();
+        const payload = {
+          appId: field(mappingForm, "appId").value.trim(),
+          repoUrl: field(mappingForm, "repoUrl").value.trim(),
+          baseBranch: field(mappingForm, "baseBranch").value.trim() || "main",
+          isActive: field(mappingForm, "isActive").value === "true",
+        };
+        if (!payload.appId || !payload.repoUrl) return;
+        await fetch("/v1/app-repo-mappings", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(payload),
+        });
+        await loadMappings();
+      });
+
+      async function boot() {
+        await loadSettings();
+        await loadMappings();
+        await loadRuns();
+        setInterval(loadRuns, 8000);
+      }
+
+      boot().catch((error) => {
+        settingsToast.textContent = `Failed to load settings: ${error.message || error}`;
+        settingsToast.className = "warn";
+      });
+    </script>
+  </body>
+</html>

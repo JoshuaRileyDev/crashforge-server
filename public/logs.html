@@ -1,0 +1,117 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Auto-fix Logs</title>
+    <style>
+      :root {
+        --bg: #0b1220;
+        --panel: #121b2e;
+        --text: #e7edf9;
+        --muted: #95a3bf;
+      }
+      body {
+        margin: 0;
+        background: radial-gradient(circle at 10% 10%, #1e2a44 0%, var(--bg) 45%);
+        color: var(--text);
+        font-family: ui-monospace, Menlo, Consolas, monospace;
+      }
+      .container {
+        width: min(1200px, 94vw);
+        margin: 24px auto 50px;
+      }
+      .toolbar { display: flex; gap: 10px; align-items: center; margin-bottom: 10px; }
+      .btn {
+        border: 1px solid #38507f;
+        background: #17233d;
+        color: #dce8ff;
+        border-radius: 10px;
+        padding: 8px 12px;
+        font-size: 13px;
+        text-decoration: none;
+      }
+      .status { color: var(--muted); font-size: 13px; }
+      #logs {
+        background: var(--panel);
+        border: 1px solid #293857;
+        border-radius: 12px;
+        padding: 12px;
+        white-space: pre-wrap;
+        word-break: break-word;
+        min-height: 60vh;
+        max-height: 80vh;
+        overflow: auto;
+      }
+      .line { margin-bottom: 8px; }
+      .info { color: #cde5ff; }
+      .warn { color: #fbbf24; }
+      .error { color: #f87171; }
+    </style>
+  </head>
+  <body>
+    <main class="container">
+      <div class="toolbar">
+        <a class="btn" href="/settings">Back To Settings</a>
+        <span id="status" class="status">Connecting…</span>
+      </div>
+      <div id="logs"></div>
+    </main>
+
+    <script>
+      const logsEl = document.getElementById("logs");
+      const statusEl = document.getElementById("status");
+
+      function esc(value) {
+        return String(value ?? "")
+          .replaceAll("&", "&amp;")
+          .replaceAll("<", "&lt;")
+          .replaceAll(">", "&gt;");
+      }
+
+      function formatDate(iso) {
+        const d = new Date(iso);
+        return Number.isNaN(d.getTime()) ? iso : d.toLocaleString();
+      }
+
+      function appendLog(log, prepend = true) {
+        const meta = log.meta ? ` ${JSON.stringify(log.meta)}` : "";
+        const html = `<div class="line ${esc(log.level)}">[${esc(formatDate(log.createdAt))}] [${esc(log.level.toUpperCase())}] run=${esc(log.runId)} ${esc(log.message)}${esc(meta)}</div>`;
+        if (prepend) {
+          logsEl.insertAdjacentHTML("afterbegin", html);
+        } else {
+          logsEl.insertAdjacentHTML("beforeend", html);
+        }
+      }
+
+      async function loadHistory() {
+        const response = await fetch("/v1/auto-fix-logs?limit=300");
+        const data = await response.json();
+        const logs = Array.isArray(data.logs) ? data.logs : [];
+        logsEl.innerHTML = "";
+        logs.reverse().forEach((log) => appendLog(log, false));
+        logsEl.scrollTop = logsEl.scrollHeight;
+      }
+
+      function connect() {
+        const stream = new EventSource("/v1/auto-fix-logs/stream");
+        stream.addEventListener("ready", () => {
+          statusEl.textContent = "Connected";
+        });
+        stream.addEventListener("log", (event) => {
+          try {
+            const log = JSON.parse(event.data);
+            appendLog(log, true);
+          } catch {}
+        });
+        stream.onerror = () => {
+          statusEl.textContent = "Reconnecting…";
+        };
+      }
+
+      loadHistory().then(connect).catch((error) => {
+        statusEl.textContent = `Failed to load logs: ${error.message || error}`;
+      });
+    </script>
+  </body>
+</html>

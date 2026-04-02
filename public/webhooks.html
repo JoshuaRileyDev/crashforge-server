@@ -1,0 +1,420 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Webhook Rules</title>
+    <style>
+      :root {
+        --bg: #0b1220;
+        --panel: #121b2e;
+        --panel-2: #1a2540;
+        --text: #e7edf9;
+        --muted: #95a3bf;
+        --accent: #34d399;
+        --warn: #f59e0b;
+      }
+      * { box-sizing: border-box; }
+      body {
+        margin: 0;
+        background: radial-gradient(circle at 10% 10%, #1e2a44 0%, var(--bg) 45%);
+        color: var(--text);
+        font-family: ui-sans-serif, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      }
+      .container {
+        width: min(1200px, 94vw);
+        margin: 28px auto 60px;
+      }
+      h1 { margin: 0 0 8px; font-size: clamp(22px, 3vw, 34px); }
+      .sub { color: var(--muted); margin-bottom: 16px; }
+      .toolbar {
+        display: flex;
+        gap: 10px;
+        align-items: center;
+        margin-bottom: 16px;
+      }
+      .btn {
+        border: 1px solid #38507f;
+        background: #17233d;
+        color: #dce8ff;
+        border-radius: 10px;
+        padding: 8px 12px;
+        font-size: 13px;
+        cursor: pointer;
+      }
+      .btn:disabled { opacity: 0.5; cursor: not-allowed; }
+      .btn-link {
+        text-decoration: none;
+        display: inline-flex;
+        align-items: center;
+      }
+      .layout {
+        display: grid;
+        grid-template-columns: 360px 1fr;
+        gap: 12px;
+      }
+      .panel {
+        background: linear-gradient(180deg, var(--panel), var(--panel-2));
+        border: 1px solid #293857;
+        border-radius: 12px;
+        padding: 12px;
+      }
+      .list {
+        display: grid;
+        gap: 8px;
+        max-height: 70vh;
+        overflow: auto;
+      }
+      .item {
+        border: 1px solid #2e4068;
+        border-radius: 10px;
+        padding: 10px;
+        cursor: pointer;
+        background: #121d33;
+      }
+      .item.active {
+        border-color: #4a6fb7;
+        background: #182646;
+      }
+      .item .meta {
+        color: var(--muted);
+        font-size: 12px;
+      }
+      .pill {
+        display: inline-block;
+        margin-left: 6px;
+        padding: 2px 6px;
+        border: 1px solid #4262a3;
+        border-radius: 999px;
+        font-size: 11px;
+        color: #c7d9ff;
+      }
+      form {
+        display: grid;
+        gap: 10px;
+      }
+      .row2 {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 10px;
+      }
+      label {
+        display: grid;
+        gap: 6px;
+        font-size: 13px;
+      }
+      input, select, textarea {
+        width: 100%;
+        border: 1px solid #33517c;
+        background: #0f1a2f;
+        color: #e8efff;
+        border-radius: 8px;
+        padding: 8px 10px;
+        font-size: 13px;
+        font-family: inherit;
+      }
+      textarea {
+        min-height: 100px;
+        resize: vertical;
+        font-family: ui-monospace, Menlo, Consolas, monospace;
+      }
+      .help {
+        margin-top: 8px;
+        border-top: 1px solid #27344f;
+        padding-top: 10px;
+        color: var(--muted);
+        font-size: 12px;
+      }
+      .code {
+        background: #0d1528;
+        border: 1px solid #2b3a57;
+        border-radius: 8px;
+        padding: 8px;
+        font-family: ui-monospace, Menlo, Consolas, monospace;
+        white-space: pre-wrap;
+      }
+      .toast {
+        margin-top: 8px;
+        font-size: 12px;
+        color: var(--accent);
+      }
+      .warn { color: var(--warn); }
+      @media (max-width: 900px) {
+        .layout { grid-template-columns: 1fr; }
+      }
+    </style>
+  </head>
+  <body>
+    <main class="container">
+      <h1>Webhook Rules</h1>
+      <div class="sub">Route crash reports by bundle ID (`appId`) to one or more webhook destinations.</div>
+      <div class="toolbar">
+        <a class="btn btn-link" href="/">Back To Crashes</a>
+        <button id="newRuleBtn" class="btn">New Rule</button>
+      </div>
+
+      <div class="layout">
+        <section class="panel">
+          <div class="list" id="ruleList"></div>
+        </section>
+
+        <section class="panel">
+          <form id="ruleForm">
+            <div class="row2">
+              <label>
+                Rule Name
+                <input name="name" required />
+              </label>
+              <label>
+                Bundle ID (`appId`)
+                <input name="appId" required placeholder="com.example.MyApp" />
+              </label>
+            </div>
+
+            <div class="row2">
+              <label>
+                Active
+                <select name="isActive">
+                  <option value="true">true</option>
+                  <option value="false">false</option>
+                </select>
+              </label>
+              <label>
+                HTTP Method
+                <select name="method">
+                  <option>POST</option>
+                  <option>PUT</option>
+                  <option>PATCH</option>
+                  <option>GET</option>
+                </select>
+              </label>
+            </div>
+
+            <label>
+              URL Template
+              <input name="urlTemplate" required placeholder="https://example.com/hooks/{{crash.payload.appId}}" />
+            </label>
+
+            <div class="row2">
+              <label>
+                Authorization Header Template (optional)
+                <input name="authHeaderTemplate" placeholder="Bearer {{crash.payload.metadata.apiKey}}" />
+              </label>
+              <label>
+                Content-Type (optional)
+                <input name="contentType" placeholder="application/json" />
+              </label>
+            </div>
+
+            <label>
+              Headers JSON Template (object of string values)
+              <textarea name="headersTemplate" placeholder='{"X-App":"{{crash.payload.appId}}","X-Crash":"{{crash.id}}"}'></textarea>
+            </label>
+
+            <label>
+              Body Template
+              <textarea name="bodyTemplate" placeholder='{"event":"crash","id":"{{crash.id}}","exception":"{{crash.payload.exceptionType}}"}'></textarea>
+            </label>
+
+            <div class="toolbar">
+              <button id="saveBtn" class="btn" type="submit">Save Rule</button>
+              <button id="deleteBtn" class="btn warn" type="button" disabled>Delete Rule</button>
+            </div>
+            <div class="toast" id="toast"></div>
+          </form>
+
+          <div class="help">
+            <strong>Template Parameters</strong>
+            <div class="code">{{crash.id}}
+{{crash.receivedAt}}
+{{crash.payload.appId}}
+{{crash.payload.exceptionType}}
+{{crash.payload.terminationReason}}
+{{crash.payload.rawReport}}
+{{crash.symbolicatedFrames.0.symbolicated}}
+{{crash.dsym.repoUrl}}</div>
+            <div>Use dot paths; array indices are supported (`symbolicatedFrames.0.symbolicated`).</div>
+          </div>
+        </section>
+      </div>
+    </main>
+
+    <script>
+      const ruleListEl = document.getElementById("ruleList");
+      const formEl = document.getElementById("ruleForm");
+      const toastEl = document.getElementById("toast");
+      const deleteBtn = document.getElementById("deleteBtn");
+      const newRuleBtn = document.getElementById("newRuleBtn");
+
+      let rules = [];
+      let selectedId = null;
+
+      function field(name) {
+        return formEl.elements.namedItem(name);
+      }
+
+      function toast(message, isWarn = false) {
+        toastEl.textContent = message;
+        toastEl.classList.toggle("warn", isWarn);
+      }
+
+      function safeJsonParse(input, fallback) {
+        try {
+          return JSON.parse(input);
+        } catch {
+          return fallback;
+        }
+      }
+
+      function escapeHtml(value) {
+        return String(value)
+          .replaceAll("&", "&amp;")
+          .replaceAll("<", "&lt;")
+          .replaceAll(">", "&gt;")
+          .replaceAll('"', "&quot;")
+          .replaceAll("'", "&#039;");
+      }
+
+      function renderList() {
+        if (!rules.length) {
+          ruleListEl.innerHTML = '<div class="item">No rules yet</div>';
+          return;
+        }
+        ruleListEl.innerHTML = rules
+          .map((rule) => {
+            const active = rule.id === selectedId ? "active" : "";
+            return `
+              <article class="item ${active}" data-id="${escapeHtml(rule.id)}">
+                <div><strong>${escapeHtml(rule.name)}</strong><span class="pill">${escapeHtml(rule.appId)}</span></div>
+                <div class="meta">${escapeHtml(rule.method)} ${escapeHtml(rule.urlTemplate)}</div>
+                <div class="meta">active=${escapeHtml(rule.isActive)}</div>
+              </article>
+            `;
+          })
+          .join("");
+
+        for (const el of ruleListEl.querySelectorAll(".item[data-id]")) {
+          el.addEventListener("click", () => {
+            selectedId = el.getAttribute("data-id");
+            const selected = rules.find((r) => r.id === selectedId);
+            fillForm(selected);
+            renderList();
+          });
+        }
+      }
+
+      function fillForm(rule) {
+        const data = rule || {
+          name: "",
+          appId: "",
+          isActive: true,
+          method: "POST",
+          urlTemplate: "",
+          authHeaderTemplate: "",
+          headersTemplate: {},
+          bodyTemplate: "",
+          contentType: "application/json",
+        };
+
+        field("name").value = data.name || "";
+        field("appId").value = data.appId || "";
+        field("isActive").value = String(Boolean(data.isActive));
+        field("method").value = data.method || "POST";
+        field("urlTemplate").value = data.urlTemplate || "";
+        field("authHeaderTemplate").value = data.authHeaderTemplate || "";
+        field("contentType").value = data.contentType || "";
+        field("headersTemplate").value = JSON.stringify(data.headersTemplate || {}, null, 2);
+        field("bodyTemplate").value = data.bodyTemplate || "";
+        deleteBtn.disabled = !rule;
+      }
+
+      async function loadRules() {
+        const response = await fetch("/v1/webhook-rules");
+        const data = await response.json();
+        rules = Array.isArray(data.rules) ? data.rules : [];
+        if (selectedId && !rules.find((r) => r.id === selectedId)) {
+          selectedId = null;
+        }
+        const selected = selectedId ? rules.find((r) => r.id === selectedId) : null;
+        fillForm(selected);
+        renderList();
+      }
+
+      formEl.addEventListener("submit", async (event) => {
+        event.preventDefault();
+        const headersTemplate = safeJsonParse(field("headersTemplate").value || "{}", {});
+        if (typeof headersTemplate !== "object" || Array.isArray(headersTemplate)) {
+          toast("Headers JSON must be an object", true);
+          return;
+        }
+
+        const payload = {
+          name: field("name").value.trim(),
+          appId: field("appId").value.trim(),
+          isActive: field("isActive").value === "true",
+          method: field("method").value.trim().toUpperCase(),
+          urlTemplate: field("urlTemplate").value.trim(),
+          authHeaderTemplate: field("authHeaderTemplate").value.trim(),
+          headersTemplate,
+          bodyTemplate: field("bodyTemplate").value,
+          contentType: field("contentType").value.trim(),
+        };
+
+        if (!payload.name || !payload.appId || !payload.urlTemplate) {
+          toast("name, appId, and urlTemplate are required", true);
+          return;
+        }
+
+        const isUpdate = Boolean(selectedId);
+        const endpoint = isUpdate ? `/v1/webhook-rules/${encodeURIComponent(selectedId)}` : "/v1/webhook-rules";
+        const method = isUpdate ? "PUT" : "POST";
+
+        const response = await fetch(endpoint, {
+          method,
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(payload),
+        });
+
+        if (!response.ok) {
+          const text = await response.text();
+          toast(`Save failed: ${text}`, true);
+          return;
+        }
+
+        const data = await response.json();
+        selectedId = data.rule?.id || selectedId;
+        await loadRules();
+        toast("Rule saved");
+      });
+
+      deleteBtn.addEventListener("click", async () => {
+        if (!selectedId) return;
+        if (!confirm("Delete this webhook rule?")) return;
+
+        const response = await fetch(`/v1/webhook-rules/${encodeURIComponent(selectedId)}`, {
+          method: "DELETE",
+        });
+
+        if (!response.ok) {
+          toast("Delete failed", true);
+          return;
+        }
+
+        selectedId = null;
+        await loadRules();
+        toast("Rule deleted");
+      });
+
+      newRuleBtn.addEventListener("click", () => {
+        selectedId = null;
+        fillForm(null);
+        renderList();
+        toast("New rule form ready");
+      });
+
+      loadRules().catch((error) => {
+        toast(`Failed to load rules: ${error.message || error}`, true);
+      });
+    </script>
+  </body>
+</html>
