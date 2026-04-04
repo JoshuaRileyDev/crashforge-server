@@ -177,6 +177,10 @@ Update automation settings:
 - `defaultBaseBranch`
 - `fixBranchPrefix`
 
+### `POST /v1/settings/cli-api-key/generate`
+
+Generate and rotate a new CLI API key. Returns plaintext key once and stores only hash server-side.
+
 ### `GET /v1/app-repo-mappings`
 
 List appId -> repo mappings.

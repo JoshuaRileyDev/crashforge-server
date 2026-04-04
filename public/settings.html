@@ -130,6 +130,16 @@
             </div>
             <div class="row2">
               <label>
+                Generated CLI API Key (shown once)
+                <input id="generatedCliApiKey" readonly placeholder="Click Generate API Key" />
+              </label>
+              <label>
+                API Key Actions
+                <button class="btn" id="generateCliApiKeyBtn" type="button">Generate API Key</button>
+              </label>
+            </div>
+            <div class="row2">
+              <label>
                 Auto-fix Enabled
                 <select name="autoFixEnabled">
                   <option value="false">false</option>
@@ -309,6 +319,8 @@
       const mappingForm = document.getElementById("mappingForm");
       const settingsToast = document.getElementById("settingsToast");
       const cliApiKeyStatus = document.getElementById("cliApiKeyStatus");
+      const generatedCliApiKey = document.getElementById("generatedCliApiKey");
+      const generateCliApiKeyBtn = document.getElementById("generateCliApiKeyBtn");
       const mappingsBody = document.getElementById("mappingsBody");
       const runsBody = document.getElementById("runsBody");
 
@@ -341,6 +353,7 @@
         field(settingsForm, "dashboardAuthEnabled").value = String(Boolean(s.dashboardAuthEnabled));
         field(settingsForm, "dashboardPassword").value = "";
         field(settingsForm, "cliApiKey").value = "";
+        if (generatedCliApiKey) generatedCliApiKey.value = "";
         if (cliApiKeyStatus) {
           cliApiKeyStatus.value = s.cliApiKeySet ? "Configured" : "Not set";
         }
@@ -472,6 +485,24 @@
         settingsToast.textContent = "Settings saved";
         settingsToast.className = "muted";
         await loadSettings();
+      });
+
+      generateCliApiKeyBtn.addEventListener("click", async () => {
+        const response = await fetch("/v1/settings/cli-api-key/generate", {
+          method: "POST",
+        });
+        if (!response.ok) {
+          const err = await response.json().catch(() => ({}));
+          settingsToast.textContent = err.error || "Failed to generate API key";
+          settingsToast.className = "warn";
+          return;
+        }
+        const data = await response.json();
+        const key = data.apiKey || "";
+        if (generatedCliApiKey) generatedCliApiKey.value = key;
+        if (cliApiKeyStatus) cliApiKeyStatus.value = "Configured";
+        settingsToast.textContent = "New CLI API key generated (copy it now)";
+        settingsToast.className = "muted";
       });
 
       mappingForm.addEventListener("submit", async (event) => {

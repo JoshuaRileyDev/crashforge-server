@@ -2,7 +2,7 @@ import express from "express";
 import fs from "node:fs/promises";
 import path from "node:path";
 import multer from "multer";
-import { randomUUID } from "node:crypto";
+import { randomBytes, randomUUID } from "node:crypto";
 import { config, paths } from "./config";
 import {
   addDSYMRecord,
@@ -207,6 +207,10 @@ function hasValidCliApiKey(req: express.Request, settings: SystemSettings): bool
   const providedKey = getCliApiKeyFromRequest(req);
   if (!providedKey) return false;
   return verifyDashboardPassword(providedKey, settings.cliApiKeyHash);
+}
+
+function generateCliApiKey(): string {
+  return `cfk_${randomBytes(24).toString("base64url")}`;
 }
 
 async function requireDashboardOrCliApiKey(
@@ -592,6 +596,19 @@ app.put("/v1/settings", requireDashboardApiAuth, async (req, res) => {
   }
   const updated = await updateSystemSettings(patch);
   return res.json({ settings: sanitizeSettingsForClient(updated) });
+});
+
+app.post("/v1/settings/cli-api-key/generate", requireDashboardApiAuth, async (_req, res) => {
+  const current = await getSystemSettings();
+  const patch = settingsFromBody({}, current);
+  const apiKey = generateCliApiKey();
+  patch.cliApiKeyHash = hashDashboardPassword(apiKey);
+  patch.cliApiKeySet = true;
+  const updated = await updateSystemSettings(patch);
+  return res.status(201).json({
+    apiKey,
+    settings: sanitizeSettingsForClient(updated),
+  });
 });
 
 app.get("/v1/app-repo-mappings", requireDashboardOrCliApiKey, async (_req, res) => {
