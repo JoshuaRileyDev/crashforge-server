@@ -95,6 +95,24 @@ function logCrashIntake(level: "info" | "warn" | "error", message: string, meta?
   }
 }
 
+function logDSYMIntake(level: "info" | "warn" | "error", message: string, meta?: Record<string, unknown>): void {
+  const entry = {
+    ts: new Date().toISOString(),
+    scope: "dsym-intake",
+    level,
+    message,
+    ...(meta ? { meta } : {}),
+  };
+  const line = `[CrashForge] ${JSON.stringify(entry)}`;
+  if (level === "error") {
+    console.error(line);
+  } else if (level === "warn") {
+    console.warn(line);
+  } else {
+    console.log(line);
+  }
+}
+
 onAutoFixLog((log) => {
   if (!autoFixLogStreamClients.size) return;
   const payload = `event: log\ndata: ${JSON.stringify(log)}\n\n`;
@@ -800,8 +818,22 @@ app.post("/v1/dsyms", upload.single("dsym"), async (req, res) => {
     const commitSha = stringFromUnknown(req.body?.commitSha);
     const localSourceDir = stringFromUnknown(req.body?.localSourceDir);
     const sourceType = normalizeSourceType(req.body?.sourceType);
+    logDSYMIntake("info", "dSYM upload received", {
+      ip: req.ip,
+      appId,
+      buildVersion,
+      sourceType,
+      hasFile: Boolean(file),
+      fileName: file?.originalname,
+      fileSize: file?.size,
+    });
 
     if (!file || !appId || !buildVersion) {
+      logDSYMIntake("warn", "dSYM upload rejected: missing required fields", {
+        appId,
+        buildVersion,
+        hasFile: Boolean(file),
+      });
       return res.status(400).json({
         error: "Missing required fields: dsym(file), appId, buildVersion",
       });
@@ -859,12 +891,23 @@ app.post("/v1/dsyms", upload.single("dsym"), async (req, res) => {
       });
     }
 
+    logDSYMIntake("info", "dSYM upload indexed", {
+      dsymId: record.id,
+      appId: record.appId,
+      buildVersion: record.buildVersion,
+      uuidCount: record.uuids.length,
+      sourceType,
+    });
+
     return res.status(201).json({
       message: "dSYM uploaded and indexed",
       record,
     });
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
+    logDSYMIntake("error", "dSYM upload failed", {
+      error: message,
+    });
     return res.status(500).json({ error: message });
   }
 });
