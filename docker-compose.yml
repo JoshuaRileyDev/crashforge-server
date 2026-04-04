@@ -2,13 +2,12 @@ services:
   postgres:
     image: postgres:16
     container_name: crashforge-postgres
+    hostname: postgres
     restart: unless-stopped
     environment:
       POSTGRES_DB: crash_reporter
       POSTGRES_USER: crash
       POSTGRES_PASSWORD: crash
-    ports:
-      - "${POSTGRES_HOST_PORT:-56432}:5432"
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U crash -d crash_reporter"]
       interval: 5s
@@ -16,6 +15,8 @@ services:
       retries: 12
     volumes:
       - pg-data:/var/lib/postgresql/data
+    networks:
+      - crashforge-backend
 
   server:
     build:
@@ -26,7 +27,9 @@ services:
     environment:
       PORT: 3000
       DATA_DIR: /app/data
-      DATABASE_URL: ${DATABASE_URL:-postgres://crash:crash@postgres:5432/crash_reporter}
+      DATABASE_URL: ${APP_DATABASE_URL:-postgres://crash:crash@postgres:5432/crash_reporter}
+      DB_WAIT_MAX_ATTEMPTS: ${DB_WAIT_MAX_ATTEMPTS:-180}
+      DB_WAIT_INTERVAL_MS: ${DB_WAIT_INTERVAL_MS:-1000}
       WEBHOOK_URL: ${WEBHOOK_URL:-}
       WEBHOOK_AUTH_HEADER: ${WEBHOOK_AUTH_HEADER:-}
       GITHUB_TOKEN: ${GITHUB_TOKEN:-}
@@ -37,7 +40,17 @@ services:
         condition: service_healthy
     volumes:
       - app-data:/app/data
+    networks:
+      - crashforge-backend
+      - crashforge-edge
 
 volumes:
   pg-data:
   app-data:
+
+networks:
+  crashforge-backend:
+    driver: bridge
+    internal: true
+  crashforge-edge:
+    driver: bridge

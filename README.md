@@ -68,13 +68,13 @@ docker compose up -d --build --force-recreate
 Ports:
 
 - API: `http://localhost:3000`
-- Postgres host port: `localhost:56432` (customizable via `POSTGRES_HOST_PORT`)
 
 Notes:
 
 - The server container now waits for PostgreSQL readiness before starting.
-- Inside Docker Compose, server DB host is `postgres` (not `127.0.0.1`).
-- If you set `DATABASE_URL` manually, do not use `127.0.0.1` unless the DB is in the same container (it is not).
+- PostgreSQL is internal-only in Compose (no host port published).
+- Inside Docker Compose, server DB host is `postgres` on private network `crashforge-backend`.
+- For Compose overrides use `APP_DATABASE_URL`, not `DATABASE_URL`.
 
 ## API reference
 
