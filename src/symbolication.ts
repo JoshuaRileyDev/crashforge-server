@@ -24,6 +24,13 @@ async function runCommand(cmd: string, args: string[], cwd?: string): Promise<st
   });
 }
 
+function isCommandNotFoundError(error: unknown): boolean {
+  if (!error || typeof error !== "object") return false;
+  const err = error as { code?: string; message?: string };
+  if (err.code === "ENOENT") return true;
+  return typeof err.message === "string" && err.message.includes("ENOENT");
+}
+
 async function findDsymAndDwarf(extractedPath: string): Promise<{ dsymDir: string; dwarfPath: string }> {
   const entries = await fs.readdir(extractedPath, { withFileTypes: true });
 
@@ -59,11 +66,30 @@ export async function extractDSYM(zipPath: string, destinationRoot: string): Pro
   });
 
   const { dwarfPath } = await findDsymAndDwarf(extractedPath);
-  const uuidRaw = await runCommand("xcrun", ["dwarfdump", "--uuid", dwarfPath]);
-  const uuids = uuidRaw
-    .split("\n")
-    .map((line) => line.match(/UUID: ([A-F0-9-]+)/i)?.[1])
-    .filter((v): v is string => Boolean(v));
+  let uuidRaw = "";
+  try {
+    uuidRaw = await runCommand("xcrun", ["dwarfdump", "--uuid", dwarfPath]);
+  } catch (error) {
+    if (!isCommandNotFoundError(error)) {
+      throw error;
+    }
+    try {
+      uuidRaw = await runCommand("dwarfdump", ["--uuid", dwarfPath]);
+    } catch (fallbackError) {
+      if (!isCommandNotFoundError(fallbackError)) {
+        throw fallbackError;
+      }
+      // Linux/non-Xcode hosts may not have dwarfdump available.
+      // Allow dSYM upload to succeed; UUID matching can be skipped.
+      uuidRaw = "";
+    }
+  }
+
+  const uuids =
+    uuidRaw
+      .split("\n")
+      .map((line) => line.match(/UUID: ([A-F0-9-]+)/i)?.[1])
+      .filter((v): v is string => Boolean(v)) ?? [];
 
   return { extractedPath, dwarfPath, uuids };
 }
