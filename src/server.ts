@@ -31,16 +31,26 @@ import {
 } from "./storage";
 import { triggerAutoFix } from "./autoFix";
 import { onAutoFixLog } from "./autoFixLogger";
+import {
+  buildDashboardSessionClearCookie,
+  buildDashboardSessionCookie,
+  createDashboardSession,
+  getDashboardSessionTokenFromRequest,
+  hashDashboardPassword,
+  isDashboardSessionValid,
+  revokeDashboardSession,
+  verifyDashboardPassword,
+} from "./dashboardAuth";
 import { enrichWithGithubCodeContext } from "./githubSourceContext";
 import { enrichWithFileSystemCodeContext, extractSourceArchive } from "./fileSourceContext";
 import { computeCrashSignature } from "./crashSignature";
+import { persistArtifactForStorage } from "./objectStorage";
 import { extractDSYM, symbolicateCrash } from "./symbolication";
 import { sendCrashWebhook } from "./webhook";
 import { AppRepoMapping, CrashPayload, CrashRecord, SourceMappingRecord, SourceType, SystemSettings, WebhookRule } from "./types";
 
 const app = express();
 app.use(express.json({ limit: "5mb" }));
-app.use(express.static(path.join(process.cwd(), "public")));
 
 const upload = multer({
   dest: paths.uploads,
@@ -124,6 +134,61 @@ function booleanFromUnknown(value: unknown, fallback = false): boolean {
   return fallback;
 }
 
+function sanitizeSettingsForClient(settings: SystemSettings): Omit<SystemSettings, "dashboardPasswordHash"> {
+  const cloned = { ...settings };
+  delete (cloned as { dashboardPasswordHash?: string }).dashboardPasswordHash;
+  return cloned;
+}
+
+function requestIsSecure(req: express.Request): boolean {
+  if (req.secure) return true;
+  const forwardedProto = req.headers["x-forwarded-proto"];
+  if (typeof forwardedProto === "string") return forwardedProto.split(",")[0]?.trim() === "https";
+  return false;
+}
+
+function dashboardPageAuthDeniedResponse(req: express.Request, res: express.Response): void {
+  const next = encodeURIComponent(req.originalUrl || "/");
+  res.redirect(`/login?next=${next}`);
+}
+
+async function checkDashboardAuth(req: express.Request, res: express.Response): Promise<boolean> {
+  const settings = await getSystemSettings();
+  if (!settings.dashboardAuthEnabled) return true;
+  const token = getDashboardSessionTokenFromRequest(req);
+  const ok = isDashboardSessionValid(token);
+  if (!ok) {
+    res.setHeader("Set-Cookie", buildDashboardSessionClearCookie(requestIsSecure(req)));
+  }
+  return ok;
+}
+
+async function requireDashboardPageAuth(
+  req: express.Request,
+  res: express.Response,
+  next: express.NextFunction
+): Promise<void> {
+  const ok = await checkDashboardAuth(req, res);
+  if (!ok) {
+    dashboardPageAuthDeniedResponse(req, res);
+    return;
+  }
+  next();
+}
+
+async function requireDashboardApiAuth(
+  req: express.Request,
+  res: express.Response,
+  next: express.NextFunction
+): Promise<void> {
+  const ok = await checkDashboardAuth(req, res);
+  if (!ok) {
+    res.status(401).json({ error: "Dashboard authentication required" });
+    return;
+  }
+  next();
+}
+
 function webhookRuleInputFromBody(body: unknown): Omit<WebhookRule, "id" | "createdAt" | "updatedAt"> | undefined {
   if (!body || typeof body !== "object") return undefined;
   const input = body as Record<string, unknown>;
@@ -177,6 +242,17 @@ function settingsFromBody(body: unknown, current: SystemSettings): Omit<SystemSe
   if (!body || typeof body !== "object") {
     return {
       autoFixEnabled: current.autoFixEnabled,
+      dashboardAuthEnabled: current.dashboardAuthEnabled,
+      dashboardPasswordHash: current.dashboardPasswordHash,
+      dashboardPasswordSet: current.dashboardPasswordSet,
+      storageProvider: current.storageProvider,
+      s3Bucket: current.s3Bucket,
+      s3Region: current.s3Region,
+      s3Endpoint: current.s3Endpoint,
+      s3AccessKeyId: current.s3AccessKeyId,
+      s3SecretAccessKey: current.s3SecretAccessKey,
+      s3Prefix: current.s3Prefix,
+      s3ForcePathStyle: current.s3ForcePathStyle,
       llmBaseUrl: current.llmBaseUrl,
       llmApiKey: current.llmApiKey,
       llmModel: current.llmModel,
@@ -196,9 +272,37 @@ function settingsFromBody(body: unknown, current: SystemSettings): Omit<SystemSe
     const trimmed = raw.trim();
     return trimmed.length ? trimmed : undefined;
   };
+  const pickStorageProvider = (): "local" | "s3" => {
+    if (!has("storageProvider")) return current.storageProvider;
+    const raw = input.storageProvider;
+    if (raw === "s3") return "s3";
+    return "local";
+  };
+
+  const rawDashboardPassword = has("dashboardPassword")
+    ? (typeof input.dashboardPassword === "string" ? input.dashboardPassword : "")
+    : "";
+  const dashboardPasswordHash = rawDashboardPassword.trim()
+    ? hashDashboardPassword(rawDashboardPassword)
+    : current.dashboardPasswordHash;
 
   return {
     autoFixEnabled: booleanFromUnknown(input.autoFixEnabled, current.autoFixEnabled),
+    dashboardAuthEnabled: booleanFromUnknown(input.dashboardAuthEnabled, current.dashboardAuthEnabled),
+    dashboardPasswordHash,
+    dashboardPasswordSet: Boolean(dashboardPasswordHash),
+    storageProvider: pickStorageProvider(),
+    s3Bucket: pickOptional("s3Bucket", current.s3Bucket),
+    s3Region: pickOptional("s3Region", current.s3Region),
+    s3Endpoint: pickOptional("s3Endpoint", current.s3Endpoint),
+    s3AccessKeyId: pickOptional("s3AccessKeyId", current.s3AccessKeyId),
+    s3SecretAccessKey: has("s3SecretAccessKey")
+      ? (typeof input.s3SecretAccessKey === "string"
+          ? (input.s3SecretAccessKey.trim() ? input.s3SecretAccessKey : undefined)
+          : current.s3SecretAccessKey)
+      : current.s3SecretAccessKey,
+    s3Prefix: pickOptional("s3Prefix", current.s3Prefix),
+    s3ForcePathStyle: booleanFromUnknown(input.s3ForcePathStyle, current.s3ForcePathStyle ?? true),
     llmBaseUrl: pickOptional("llmBaseUrl", current.llmBaseUrl),
     llmApiKey: has("llmApiKey")
       ? (typeof input.llmApiKey === "string" ? input.llmApiKey : current.llmApiKey)
@@ -256,28 +360,73 @@ app.get("/health", (_req, res) => {
   res.json({ ok: true, service: "crash-reporter", timestamp: new Date().toISOString() });
 });
 
-app.get("/", (_req, res) => {
+app.get("/login", (_req, res) => {
+  res.sendFile(path.join(process.cwd(), "public", "login.html"));
+});
+
+app.get("/v1/auth/status", async (req, res) => {
+  const settings = await getSystemSettings();
+  const token = getDashboardSessionTokenFromRequest(req);
+  const authenticated = !settings.dashboardAuthEnabled || isDashboardSessionValid(token);
+  return res.json({
+    enabled: settings.dashboardAuthEnabled,
+    passwordSet: settings.dashboardPasswordSet,
+    authenticated,
+  });
+});
+
+app.post("/v1/auth/login", async (req, res) => {
+  const settings = await getSystemSettings();
+  if (!settings.dashboardAuthEnabled) {
+    return res.json({ ok: true, enabled: false });
+  }
+
+  const password = stringFromUnknown((req.body as Record<string, unknown>)?.password) ?? "";
+  if (!password) {
+    return res.status(400).json({ error: "Password is required" });
+  }
+  if (!settings.dashboardPasswordHash) {
+    return res.status(400).json({ error: "Dashboard password is not configured" });
+  }
+
+  if (!verifyDashboardPassword(password, settings.dashboardPasswordHash)) {
+    return res.status(401).json({ error: "Invalid password" });
+  }
+
+  const token = createDashboardSession();
+  res.setHeader("Set-Cookie", buildDashboardSessionCookie(token, requestIsSecure(req)));
+  return res.json({ ok: true, enabled: true });
+});
+
+app.post("/v1/auth/logout", async (req, res) => {
+  const token = getDashboardSessionTokenFromRequest(req);
+  revokeDashboardSession(token);
+  res.setHeader("Set-Cookie", buildDashboardSessionClearCookie(requestIsSecure(req)));
+  return res.json({ ok: true });
+});
+
+app.get("/", requireDashboardPageAuth, (_req, res) => {
   res.sendFile(path.join(process.cwd(), "public", "index.html"));
 });
 
-app.get("/settings", (_req, res) => {
+app.get("/settings", requireDashboardPageAuth, (_req, res) => {
   res.sendFile(path.join(process.cwd(), "public", "settings.html"));
 });
 
-app.get("/logs", (_req, res) => {
+app.get("/logs", requireDashboardPageAuth, (_req, res) => {
   res.sendFile(path.join(process.cwd(), "public", "logs.html"));
 });
 
-app.get("/webhooks", (_req, res) => {
+app.get("/webhooks", requireDashboardPageAuth, (_req, res) => {
   res.sendFile(path.join(process.cwd(), "public", "webhooks.html"));
 });
 
-app.get("/v1/dsyms", async (_req, res) => {
+app.get("/v1/dsyms", requireDashboardApiAuth, async (_req, res) => {
   const records = await listDSYMs();
   res.json({ count: records.length, records });
 });
 
-app.get("/v1/crashes", async (req, res) => {
+app.get("/v1/crashes", requireDashboardApiAuth, async (req, res) => {
   const rawLimit = Number(req.query.limit ?? 50);
   const limit = Number.isFinite(rawLimit) ? rawLimit : 50;
   const full = String(req.query.full ?? "0") === "1";
@@ -295,7 +444,7 @@ app.get("/v1/crashes", async (req, res) => {
   });
 });
 
-app.get("/v1/crashes/stream", (req, res) => {
+app.get("/v1/crashes/stream", requireDashboardApiAuth, (req, res) => {
   req.socket.setTimeout(0);
   res.setHeader("Content-Type", "text/event-stream");
   res.setHeader("Cache-Control", "no-cache, no-transform");
@@ -316,7 +465,7 @@ app.get("/v1/crashes/stream", (req, res) => {
   });
 });
 
-app.get("/v1/crashes/:id", async (req, res) => {
+app.get("/v1/crashes/:id", requireDashboardApiAuth, async (req, res) => {
   const id = stringFromUnknown(req.params.id);
   if (!id) {
     return res.status(400).json({ error: "Crash id is required" });
@@ -330,12 +479,12 @@ app.get("/v1/crashes/:id", async (req, res) => {
   return res.json({ record });
 });
 
-app.get("/v1/webhook-rules", async (_req, res) => {
+app.get("/v1/webhook-rules", requireDashboardApiAuth, async (_req, res) => {
   const rules = await listWebhookRules();
   return res.json({ count: rules.length, rules });
 });
 
-app.post("/v1/webhook-rules", async (req, res) => {
+app.post("/v1/webhook-rules", requireDashboardApiAuth, async (req, res) => {
   const input = webhookRuleInputFromBody(req.body);
   if (!input) {
     return res.status(400).json({
@@ -347,7 +496,7 @@ app.post("/v1/webhook-rules", async (req, res) => {
   return res.status(201).json({ rule: created });
 });
 
-app.put("/v1/webhook-rules/:id", async (req, res) => {
+app.put("/v1/webhook-rules/:id", requireDashboardApiAuth, async (req, res) => {
   const id = stringFromUnknown(req.params.id);
   if (!id) {
     return res.status(400).json({ error: "Webhook rule id is required" });
@@ -368,7 +517,7 @@ app.put("/v1/webhook-rules/:id", async (req, res) => {
   return res.json({ rule: updated });
 });
 
-app.delete("/v1/webhook-rules/:id", async (req, res) => {
+app.delete("/v1/webhook-rules/:id", requireDashboardApiAuth, async (req, res) => {
   const id = stringFromUnknown(req.params.id);
   if (!id) {
     return res.status(400).json({ error: "Webhook rule id is required" });
@@ -382,24 +531,27 @@ app.delete("/v1/webhook-rules/:id", async (req, res) => {
   return res.status(204).send();
 });
 
-app.get("/v1/settings", async (_req, res) => {
+app.get("/v1/settings", requireDashboardApiAuth, async (_req, res) => {
   const settings = await getSystemSettings();
-  return res.json({ settings });
+  return res.json({ settings: sanitizeSettingsForClient(settings) });
 });
 
-app.put("/v1/settings", async (req, res) => {
+app.put("/v1/settings", requireDashboardApiAuth, async (req, res) => {
   const current = await getSystemSettings();
   const patch = settingsFromBody(req.body, current);
+  if (patch.dashboardAuthEnabled && !patch.dashboardPasswordHash && !current.dashboardPasswordHash) {
+    return res.status(400).json({ error: "Set a dashboard password before enabling password protection" });
+  }
   const updated = await updateSystemSettings(patch);
-  return res.json({ settings: updated });
+  return res.json({ settings: sanitizeSettingsForClient(updated) });
 });
 
-app.get("/v1/app-repo-mappings", async (_req, res) => {
+app.get("/v1/app-repo-mappings", requireDashboardApiAuth, async (_req, res) => {
   const mappings = await listAppRepoMappings();
   return res.json({ count: mappings.length, mappings });
 });
 
-app.post("/v1/app-repo-mappings", async (req, res) => {
+app.post("/v1/app-repo-mappings", requireDashboardApiAuth, async (req, res) => {
   const mapping = appRepoMappingFromBody(req.body);
   if (!mapping) {
     return res.status(400).json({ error: "Invalid mapping: appId and repoUrl are required" });
@@ -408,7 +560,7 @@ app.post("/v1/app-repo-mappings", async (req, res) => {
   return res.status(201).json({ mapping: created });
 });
 
-app.put("/v1/app-repo-mappings/:id", async (req, res) => {
+app.put("/v1/app-repo-mappings/:id", requireDashboardApiAuth, async (req, res) => {
   const id = stringFromUnknown(req.params.id);
   if (!id) return res.status(400).json({ error: "Mapping id is required" });
 
@@ -432,7 +584,7 @@ app.put("/v1/app-repo-mappings/:id", async (req, res) => {
   return res.json({ mapping: updated });
 });
 
-app.delete("/v1/app-repo-mappings/:id", async (req, res) => {
+app.delete("/v1/app-repo-mappings/:id", requireDashboardApiAuth, async (req, res) => {
   const id = stringFromUnknown(req.params.id);
   if (!id) return res.status(400).json({ error: "Mapping id is required" });
   const deleted = await deleteAppRepoMapping(id);
@@ -440,14 +592,14 @@ app.delete("/v1/app-repo-mappings/:id", async (req, res) => {
   return res.status(204).send();
 });
 
-app.get("/v1/auto-fix-runs", async (req, res) => {
+app.get("/v1/auto-fix-runs", requireDashboardApiAuth, async (req, res) => {
   const rawLimit = Number(req.query.limit ?? 50);
   const limit = Number.isFinite(rawLimit) ? rawLimit : 50;
   const runs = await listRecentAutoFixRuns(limit);
   return res.json({ count: runs.length, runs });
 });
 
-app.get("/v1/auto-fix-logs", async (req, res) => {
+app.get("/v1/auto-fix-logs", requireDashboardApiAuth, async (req, res) => {
   const rawLimit = Number(req.query.limit ?? 200);
   const limit = Number.isFinite(rawLimit) ? rawLimit : 200;
   const runId = stringFromUnknown(req.query.runId);
@@ -455,7 +607,7 @@ app.get("/v1/auto-fix-logs", async (req, res) => {
   return res.json({ count: logs.length, logs });
 });
 
-app.get("/v1/auto-fix-logs/stream", (req, res) => {
+app.get("/v1/auto-fix-logs/stream", requireDashboardApiAuth, (req, res) => {
   req.socket.setTimeout(0);
   res.setHeader("Content-Type", "text/event-stream");
   res.setHeader("Cache-Control", "no-cache, no-transform");
@@ -527,6 +679,14 @@ app.post("/v1/sources", upload.single("sources"), async (req, res) => {
     const extractionRoot = path.join(paths.sources, appId, buildVersion);
     const extracted = await extractSourceArchive(canonicalZipPath, extractionRoot);
 
+    const settings = await getSystemSettings();
+    const storedZipPath = await persistArtifactForStorage(
+      canonicalZipPath,
+      ["sources", appId, buildVersion, `${randomUUID()}.zip`],
+      "application/zip",
+      settings
+    );
+
     const mapping = await addSourceMapping({
       appId,
       buildVersion,
@@ -534,7 +694,7 @@ app.post("/v1/sources", upload.single("sources"), async (req, res) => {
       repoUrl: undefined,
       commitSha: undefined,
       localPath: undefined,
-      zipPath: canonicalZipPath,
+      zipPath: storedZipPath,
       extractedPath: extracted.extractedPath,
     });
 
@@ -570,10 +730,18 @@ app.post("/v1/dsyms", upload.single("dsym"), async (req, res) => {
     const extractionRoot = path.join(paths.dsyms, appId, buildVersion);
     const extracted = await extractDSYM(canonicalZipPath, extractionRoot);
 
+    const settings = await getSystemSettings();
+    const storedZipPath = await persistArtifactForStorage(
+      canonicalZipPath,
+      ["dsyms", appId, buildVersion, `${randomUUID()}.zip`],
+      "application/zip",
+      settings
+    );
+
     const record = await addDSYMRecord({
       appId,
       buildVersion,
-      zipPath: canonicalZipPath,
+      zipPath: storedZipPath,
       extractedPath: extracted.extractedPath,
       dwarfPath: extracted.dwarfPath,
       uuids: extracted.uuids,

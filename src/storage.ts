@@ -108,6 +108,16 @@ function mapWebhookRuleRow(row: {
 function mapSystemSettingsRow(row: {
   id: string;
   auto_fix_enabled: boolean;
+  dashboard_auth_enabled: boolean;
+  dashboard_password_hash: string | null;
+  storage_provider: "local" | "s3";
+  s3_bucket: string | null;
+  s3_region: string | null;
+  s3_endpoint: string | null;
+  s3_access_key_id: string | null;
+  s3_secret_access_key: string | null;
+  s3_prefix: string | null;
+  s3_force_path_style: boolean | null;
   llm_base_url: string | null;
   llm_api_key: string | null;
   llm_model: string | null;
@@ -122,6 +132,17 @@ function mapSystemSettingsRow(row: {
   return {
     id: row.id,
     autoFixEnabled: row.auto_fix_enabled,
+    dashboardAuthEnabled: row.dashboard_auth_enabled,
+    dashboardPasswordHash: row.dashboard_password_hash ?? undefined,
+    dashboardPasswordSet: Boolean(row.dashboard_password_hash),
+    storageProvider: row.storage_provider ?? "local",
+    s3Bucket: row.s3_bucket ?? undefined,
+    s3Region: row.s3_region ?? undefined,
+    s3Endpoint: row.s3_endpoint ?? undefined,
+    s3AccessKeyId: row.s3_access_key_id ?? undefined,
+    s3SecretAccessKey: row.s3_secret_access_key ?? undefined,
+    s3Prefix: row.s3_prefix ?? undefined,
+    s3ForcePathStyle: row.s3_force_path_style ?? true,
     llmBaseUrl: row.llm_base_url ?? undefined,
     llmApiKey: row.llm_api_key ?? undefined,
     llmModel: row.llm_model ?? undefined,
@@ -330,6 +351,16 @@ export async function initStorage(): Promise<void> {
     CREATE TABLE IF NOT EXISTS system_settings (
       id TEXT PRIMARY KEY,
       auto_fix_enabled BOOLEAN NOT NULL DEFAULT FALSE,
+      dashboard_auth_enabled BOOLEAN NOT NULL DEFAULT FALSE,
+      dashboard_password_hash TEXT,
+      storage_provider TEXT NOT NULL DEFAULT 'local',
+      s3_bucket TEXT,
+      s3_region TEXT,
+      s3_endpoint TEXT,
+      s3_access_key_id TEXT,
+      s3_secret_access_key TEXT,
+      s3_prefix TEXT,
+      s3_force_path_style BOOLEAN NOT NULL DEFAULT TRUE,
       llm_base_url TEXT,
       llm_api_key TEXT,
       llm_model TEXT,
@@ -341,6 +372,56 @@ export async function initStorage(): Promise<void> {
       created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
       updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
     );
+  `);
+
+  await pool.query(`
+    ALTER TABLE system_settings
+    ADD COLUMN IF NOT EXISTS dashboard_auth_enabled BOOLEAN NOT NULL DEFAULT FALSE;
+  `);
+
+  await pool.query(`
+    ALTER TABLE system_settings
+    ADD COLUMN IF NOT EXISTS dashboard_password_hash TEXT;
+  `);
+
+  await pool.query(`
+    ALTER TABLE system_settings
+    ADD COLUMN IF NOT EXISTS storage_provider TEXT NOT NULL DEFAULT 'local';
+  `);
+
+  await pool.query(`
+    ALTER TABLE system_settings
+    ADD COLUMN IF NOT EXISTS s3_bucket TEXT;
+  `);
+
+  await pool.query(`
+    ALTER TABLE system_settings
+    ADD COLUMN IF NOT EXISTS s3_region TEXT;
+  `);
+
+  await pool.query(`
+    ALTER TABLE system_settings
+    ADD COLUMN IF NOT EXISTS s3_endpoint TEXT;
+  `);
+
+  await pool.query(`
+    ALTER TABLE system_settings
+    ADD COLUMN IF NOT EXISTS s3_access_key_id TEXT;
+  `);
+
+  await pool.query(`
+    ALTER TABLE system_settings
+    ADD COLUMN IF NOT EXISTS s3_secret_access_key TEXT;
+  `);
+
+  await pool.query(`
+    ALTER TABLE system_settings
+    ADD COLUMN IF NOT EXISTS s3_prefix TEXT;
+  `);
+
+  await pool.query(`
+    ALTER TABLE system_settings
+    ADD COLUMN IF NOT EXISTS s3_force_path_style BOOLEAN NOT NULL DEFAULT TRUE;
   `);
 
   await pool.query(`
@@ -743,20 +824,40 @@ export async function updateSystemSettings(
       UPDATE system_settings
       SET
         auto_fix_enabled = $1,
-        llm_base_url = $2,
-        llm_api_key = $3,
-        llm_model = $4,
-        github_token = $5,
-        git_user_name = $6,
-        git_user_email = $7,
-        default_base_branch = $8,
-        fix_branch_prefix = $9,
+        dashboard_auth_enabled = $2,
+        dashboard_password_hash = COALESCE($3, dashboard_password_hash),
+        storage_provider = $4,
+        s3_bucket = $5,
+        s3_region = $6,
+        s3_endpoint = $7,
+        s3_access_key_id = $8,
+        s3_secret_access_key = $9,
+        s3_prefix = $10,
+        s3_force_path_style = $11,
+        llm_base_url = $12,
+        llm_api_key = $13,
+        llm_model = $14,
+        github_token = $15,
+        git_user_name = $16,
+        git_user_email = $17,
+        default_base_branch = $18,
+        fix_branch_prefix = $19,
         updated_at = NOW()
       WHERE id = 'default'
       RETURNING *;
     `,
     [
       patch.autoFixEnabled,
+      patch.dashboardAuthEnabled,
+      patch.dashboardPasswordHash ?? null,
+      patch.storageProvider ?? "local",
+      patch.s3Bucket ?? null,
+      patch.s3Region ?? null,
+      patch.s3Endpoint ?? null,
+      patch.s3AccessKeyId ?? null,
+      patch.s3SecretAccessKey ?? null,
+      patch.s3Prefix ?? null,
+      patch.s3ForcePathStyle ?? true,
       patch.llmBaseUrl ?? null,
       patch.llmApiKey ?? null,
       patch.llmModel ?? null,

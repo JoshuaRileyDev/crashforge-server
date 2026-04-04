@@ -96,6 +96,17 @@ export interface WebhookRule {
 export interface SystemSettings {
   id: string;
   autoFixEnabled: boolean;
+  dashboardAuthEnabled: boolean;
+  dashboardPasswordHash?: string;
+  dashboardPasswordSet: boolean;
+  storageProvider: "local" | "s3";
+  s3Bucket?: string;
+  s3Region?: string;
+  s3Endpoint?: string;
+  s3AccessKeyId?: string;
+  s3SecretAccessKey?: string;
+  s3Prefix?: string;
+  s3ForcePathStyle?: boolean;
   llmBaseUrl?: string;
   llmApiKey?: string;
   llmModel?: string;

@@ -16,6 +16,8 @@ CrashForge Server ingests iOS crash payloads, symbolicates them with uploaded dS
 - Runs optional auto-fix PR generation (OpenAI-compatible LLM + GitHub).
 - Suppresses duplicate auto-fix runs for identical crash signatures.
 - Cleans up temporary cloned repos after each auto-fix run.
+- Supports optional dashboard password protection.
+- Supports storage provider selection (`local` or `s3`) from settings.
 
 ## Repository scope
 
@@ -50,6 +52,7 @@ UI:
 - Settings / Auto-fix config: `http://localhost:3000/settings`
 - Webhook rules: `http://localhost:3000/webhooks`
 - Live auto-fix logs: `http://localhost:3000/logs`
+- Login page (when enabled): `http://localhost:3000/login`
 
 ## Docker + Postgres
 

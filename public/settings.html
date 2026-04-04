@@ -107,6 +107,19 @@
           <form id="settingsForm">
             <div class="row2">
               <label>
+                Dashboard Password Protection
+                <select name="dashboardAuthEnabled">
+                  <option value="false">false</option>
+                  <option value="true">true</option>
+                </select>
+              </label>
+              <label>
+                Set / Rotate Dashboard Password
+                <input name="dashboardPassword" type="password" placeholder="Enter new password (leave blank to keep current)" />
+              </label>
+            </div>
+            <div class="row2">
+              <label>
                 Auto-fix Enabled
                 <select name="autoFixEnabled">
                   <option value="false">false</option>
@@ -152,6 +165,54 @@
               <label>
                 Git Author Email (optional)
                 <input name="gitUserEmail" placeholder="bot@example.com" />
+              </label>
+            </div>
+
+            <h3 style="margin: 14px 0 8px;">Storage</h3>
+            <div class="row2">
+              <label>
+                Storage Provider
+                <select name="storageProvider" id="storageProvider">
+                  <option value="local">local</option>
+                  <option value="s3">s3</option>
+                </select>
+              </label>
+              <label>
+                S3 Bucket
+                <input name="s3Bucket" placeholder="crashforge-artifacts" />
+              </label>
+            </div>
+            <div class="row2">
+              <label>
+                S3 Region
+                <input name="s3Region" placeholder="us-east-1" />
+              </label>
+              <label>
+                S3 Endpoint (optional)
+                <input name="s3Endpoint" placeholder="https://s3.amazonaws.com or R2 endpoint" />
+              </label>
+            </div>
+            <div class="row2">
+              <label>
+                S3 Access Key ID
+                <input name="s3AccessKeyId" placeholder="AKIA..." />
+              </label>
+              <label>
+                S3 Secret Access Key
+                <input name="s3SecretAccessKey" type="password" placeholder="Leave blank to keep current" />
+              </label>
+            </div>
+            <div class="row2">
+              <label>
+                S3 Prefix (optional)
+                <input name="s3Prefix" placeholder="crashforge/prod" />
+              </label>
+              <label>
+                S3 Force Path Style
+                <select name="s3ForcePathStyle">
+                  <option value="true">true</option>
+                  <option value="false">false</option>
+                </select>
               </label>
             </div>
             <div class="toolbar">
@@ -234,6 +295,7 @@
 
     <script>
       const settingsForm = document.getElementById("settingsForm");
+      const storageProviderInput = document.getElementById("storageProvider");
       const mappingForm = document.getElementById("mappingForm");
       const settingsToast = document.getElementById("settingsToast");
       const mappingsBody = document.getElementById("mappingsBody");
@@ -259,8 +321,14 @@
 
       async function loadSettings() {
         const response = await fetch("/v1/settings");
+        if (response.status === 401) {
+          location.href = "/login?next=" + encodeURIComponent(location.pathname);
+          return;
+        }
         const data = await response.json();
         const s = data.settings || {};
+        field(settingsForm, "dashboardAuthEnabled").value = String(Boolean(s.dashboardAuthEnabled));
+        field(settingsForm, "dashboardPassword").value = "";
         field(settingsForm, "autoFixEnabled").value = String(Boolean(s.autoFixEnabled));
         field(settingsForm, "llmBaseUrl").value = s.llmBaseUrl || "";
         field(settingsForm, "llmApiKey").value = s.llmApiKey || "";
@@ -270,6 +338,31 @@
         field(settingsForm, "gitUserEmail").value = s.gitUserEmail || "";
         field(settingsForm, "defaultBaseBranch").value = s.defaultBaseBranch || "main";
         field(settingsForm, "fixBranchPrefix").value = s.fixBranchPrefix || "crash-fix";
+        field(settingsForm, "storageProvider").value = s.storageProvider || "local";
+        field(settingsForm, "s3Bucket").value = s.s3Bucket || "";
+        field(settingsForm, "s3Region").value = s.s3Region || "";
+        field(settingsForm, "s3Endpoint").value = s.s3Endpoint || "";
+        field(settingsForm, "s3AccessKeyId").value = s.s3AccessKeyId || "";
+        field(settingsForm, "s3SecretAccessKey").value = "";
+        field(settingsForm, "s3Prefix").value = s.s3Prefix || "";
+        field(settingsForm, "s3ForcePathStyle").value = String(s.s3ForcePathStyle ?? true);
+      }
+
+      function updateStorageFieldState() {
+        const isS3 = field(settingsForm, "storageProvider").value === "s3";
+        for (const name of [
+          "s3Bucket",
+          "s3Region",
+          "s3Endpoint",
+          "s3AccessKeyId",
+          "s3SecretAccessKey",
+          "s3Prefix",
+          "s3ForcePathStyle",
+        ]) {
+          const input = field(settingsForm, name);
+          if (!input) continue;
+          input.disabled = !isS3;
+        }
       }
 
       async function loadMappings() {
@@ -329,6 +422,8 @@
       settingsForm.addEventListener("submit", async (event) => {
         event.preventDefault();
         const payload = {
+          dashboardAuthEnabled: field(settingsForm, "dashboardAuthEnabled").value === "true",
+          dashboardPassword: field(settingsForm, "dashboardPassword").value,
           autoFixEnabled: field(settingsForm, "autoFixEnabled").value === "true",
           llmBaseUrl: field(settingsForm, "llmBaseUrl").value.trim(),
           llmApiKey: field(settingsForm, "llmApiKey").value,
@@ -338,6 +433,14 @@
           gitUserEmail: field(settingsForm, "gitUserEmail").value.trim(),
           defaultBaseBranch: field(settingsForm, "defaultBaseBranch").value.trim(),
           fixBranchPrefix: field(settingsForm, "fixBranchPrefix").value.trim(),
+          storageProvider: field(settingsForm, "storageProvider").value,
+          s3Bucket: field(settingsForm, "s3Bucket").value.trim(),
+          s3Region: field(settingsForm, "s3Region").value.trim(),
+          s3Endpoint: field(settingsForm, "s3Endpoint").value.trim(),
+          s3AccessKeyId: field(settingsForm, "s3AccessKeyId").value.trim(),
+          s3SecretAccessKey: field(settingsForm, "s3SecretAccessKey").value,
+          s3Prefix: field(settingsForm, "s3Prefix").value.trim(),
+          s3ForcePathStyle: field(settingsForm, "s3ForcePathStyle").value === "true",
         };
         const response = await fetch("/v1/settings", {
           method: "PUT",
@@ -345,7 +448,8 @@
           body: JSON.stringify(payload),
         });
         if (!response.ok) {
-          settingsToast.textContent = "Failed to save settings";
+          const err = await response.json().catch(() => ({}));
+          settingsToast.textContent = err.error || "Failed to save settings";
           settingsToast.className = "warn";
           return;
         }
@@ -373,10 +477,13 @@
 
       async function boot() {
         await loadSettings();
+        updateStorageFieldState();
         await loadMappings();
         await loadRuns();
         setInterval(loadRuns, 8000);
       }
+
+      storageProviderInput.addEventListener("change", updateStorageFieldState);
 
       boot().catch((error) => {
         settingsToast.textContent = `Failed to load settings: ${error.message || error}`;
