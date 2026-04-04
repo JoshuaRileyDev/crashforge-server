@@ -77,6 +77,24 @@ type CrashStreamEvent = {
 const crashStreamClients = new Set<express.Response>();
 const autoFixLogStreamClients = new Set<express.Response>();
 
+function logCrashIntake(level: "info" | "warn" | "error", message: string, meta?: Record<string, unknown>): void {
+  const entry = {
+    ts: new Date().toISOString(),
+    scope: "crash-intake",
+    level,
+    message,
+    ...(meta ? { meta } : {}),
+  };
+  const line = `[CrashForge] ${JSON.stringify(entry)}`;
+  if (level === "error") {
+    console.error(line);
+  } else if (level === "warn") {
+    console.warn(line);
+  } else {
+    console.log(line);
+  }
+}
+
 onAutoFixLog((log) => {
   if (!autoFixLogStreamClients.size) return;
   const payload = `event: log\ndata: ${JSON.stringify(log)}\n\n`;
@@ -854,8 +872,21 @@ app.post("/v1/dsyms", upload.single("dsym"), async (req, res) => {
 app.post("/v1/crashes", async (req, res) => {
   try {
     const payload = req.body as CrashPayload;
+    logCrashIntake("info", "Crash report received", {
+      ip: req.ip,
+      appId: payload?.appId,
+      buildVersion: payload?.buildVersion,
+      exceptionType: payload?.exceptionType,
+      frameCount: Array.isArray(payload?.frames) ? payload.frames.length : 0,
+      binaryImageCount: Array.isArray(payload?.binaryImages) ? payload.binaryImages.length : 0,
+      captureMode: typeof payload?.metadata?.captureMode === "string" ? payload.metadata.captureMode : undefined,
+    });
 
     if (!payload?.appId || !payload?.buildVersion || !Array.isArray(payload.frames) || !Array.isArray(payload.binaryImages)) {
+      logCrashIntake("warn", "Crash report rejected: invalid payload", {
+        appId: payload?.appId,
+        buildVersion: payload?.buildVersion,
+      });
       return res.status(400).json({
         error: "Invalid payload: appId, buildVersion, frames[], binaryImages[] required",
       });
@@ -864,10 +895,22 @@ app.post("/v1/crashes", async (req, res) => {
     const preferredUUID = payload.binaryImages[0]?.uuid;
     const dsym = await findBestDSYM(payload.appId, payload.buildVersion, preferredUUID);
     if (!dsym) {
+      logCrashIntake("warn", "Crash report rejected: no matching dSYM", {
+        appId: payload.appId,
+        buildVersion: payload.buildVersion,
+        preferredUUID,
+      });
       return res.status(404).json({
         error: "No matching dSYM found for appId/buildVersion",
       });
     }
+    logCrashIntake("info", "Matched dSYM for crash", {
+      appId: payload.appId,
+      buildVersion: payload.buildVersion,
+      dsymId: dsym.id,
+      preferredUUID,
+      dsymUUIDCount: dsym.uuids.length,
+    });
 
     const symbolicatedFrames = await symbolicateCrash(payload, dsym);
 
@@ -936,6 +979,13 @@ app.post("/v1/crashes", async (req, res) => {
 
     const crashSignature = computeCrashSignature(record);
     await persistCrash(record, crashSignature);
+    logCrashIntake("info", "Crash persisted", {
+      crashId: record.id,
+      appId: payload.appId,
+      buildVersion: payload.buildVersion,
+      sourceNote: enriched.sourceNote,
+      crashSignature,
+    });
     broadcastCrash(record);
 
     sendCrashWebhook(record).catch((error) => {
@@ -948,6 +998,11 @@ app.post("/v1/crashes", async (req, res) => {
         console.error("Auto-fix pipeline failed:", error);
       });
     }
+    logCrashIntake("info", "Crash processing complete", {
+      crashId: record.id,
+      duplicateCrash: isDuplicateCrash,
+      autoFixTriggered: !isDuplicateCrash,
+    });
 
     return res.status(202).json({
       message: "Crash accepted and processed",
@@ -960,6 +1015,9 @@ app.post("/v1/crashes", async (req, res) => {
     });
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
+    logCrashIntake("error", "Crash processing failed", {
+      error: message,
+    });
     return res.status(500).json({ error: message });
   }
 });
