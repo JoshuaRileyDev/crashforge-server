@@ -137,6 +137,7 @@ function booleanFromUnknown(value: unknown, fallback = false): boolean {
 function sanitizeSettingsForClient(settings: SystemSettings): Omit<SystemSettings, "dashboardPasswordHash"> {
   const cloned = { ...settings };
   delete (cloned as { dashboardPasswordHash?: string }).dashboardPasswordHash;
+  delete (cloned as { cliApiKeyHash?: string }).cliApiKeyHash;
   return cloned;
 }
 
@@ -184,6 +185,45 @@ async function requireDashboardApiAuth(
   const ok = await checkDashboardAuth(req, res);
   if (!ok) {
     res.status(401).json({ error: "Dashboard authentication required" });
+    return;
+  }
+  next();
+}
+
+function getCliApiKeyFromRequest(req: express.Request): string | undefined {
+  const keyHeader = req.headers["x-crashforge-api-key"];
+  if (typeof keyHeader === "string" && keyHeader.trim()) return keyHeader.trim();
+
+  const authorization = req.headers.authorization;
+  if (typeof authorization === "string") {
+    const match = authorization.match(/^Bearer\s+(.+)$/i);
+    if (match?.[1]?.trim()) return match[1].trim();
+  }
+  return undefined;
+}
+
+function hasValidCliApiKey(req: express.Request, settings: SystemSettings): boolean {
+  if (!settings.cliApiKeyHash) return false;
+  const providedKey = getCliApiKeyFromRequest(req);
+  if (!providedKey) return false;
+  return verifyDashboardPassword(providedKey, settings.cliApiKeyHash);
+}
+
+async function requireDashboardOrCliApiKey(
+  req: express.Request,
+  res: express.Response,
+  next: express.NextFunction
+): Promise<void> {
+  const settings = await getSystemSettings();
+  if (hasValidCliApiKey(req, settings)) {
+    next();
+    return;
+  }
+
+  const ok = !settings.dashboardAuthEnabled || isDashboardSessionValid(getDashboardSessionTokenFromRequest(req));
+  if (!ok) {
+    res.setHeader("Set-Cookie", buildDashboardSessionClearCookie(requestIsSecure(req)));
+    res.status(401).json({ error: "Dashboard session or x-crashforge-api-key required" });
     return;
   }
   next();
@@ -245,6 +285,8 @@ function settingsFromBody(body: unknown, current: SystemSettings): Omit<SystemSe
       dashboardAuthEnabled: current.dashboardAuthEnabled,
       dashboardPasswordHash: current.dashboardPasswordHash,
       dashboardPasswordSet: current.dashboardPasswordSet,
+      cliApiKeyHash: current.cliApiKeyHash,
+      cliApiKeySet: current.cliApiKeySet,
       storageProvider: current.storageProvider,
       s3Bucket: current.s3Bucket,
       s3Region: current.s3Region,
@@ -285,12 +327,18 @@ function settingsFromBody(body: unknown, current: SystemSettings): Omit<SystemSe
   const dashboardPasswordHash = rawDashboardPassword.trim()
     ? hashDashboardPassword(rawDashboardPassword)
     : current.dashboardPasswordHash;
+  const rawCliApiKey = has("cliApiKey")
+    ? (typeof input.cliApiKey === "string" ? input.cliApiKey : "")
+    : "";
+  const cliApiKeyHash = rawCliApiKey.trim() ? hashDashboardPassword(rawCliApiKey) : current.cliApiKeyHash;
 
   return {
     autoFixEnabled: booleanFromUnknown(input.autoFixEnabled, current.autoFixEnabled),
     dashboardAuthEnabled: booleanFromUnknown(input.dashboardAuthEnabled, current.dashboardAuthEnabled),
     dashboardPasswordHash,
     dashboardPasswordSet: Boolean(dashboardPasswordHash),
+    cliApiKeyHash,
+    cliApiKeySet: Boolean(cliApiKeyHash),
     storageProvider: pickStorageProvider(),
     s3Bucket: pickOptional("s3Bucket", current.s3Bucket),
     s3Region: pickOptional("s3Region", current.s3Region),
@@ -546,12 +594,12 @@ app.put("/v1/settings", requireDashboardApiAuth, async (req, res) => {
   return res.json({ settings: sanitizeSettingsForClient(updated) });
 });
 
-app.get("/v1/app-repo-mappings", requireDashboardApiAuth, async (_req, res) => {
+app.get("/v1/app-repo-mappings", requireDashboardOrCliApiKey, async (_req, res) => {
   const mappings = await listAppRepoMappings();
   return res.json({ count: mappings.length, mappings });
 });
 
-app.post("/v1/app-repo-mappings", requireDashboardApiAuth, async (req, res) => {
+app.post("/v1/app-repo-mappings", requireDashboardOrCliApiKey, async (req, res) => {
   const mapping = appRepoMappingFromBody(req.body);
   if (!mapping) {
     return res.status(400).json({ error: "Invalid mapping: appId and repoUrl are required" });
@@ -560,7 +608,7 @@ app.post("/v1/app-repo-mappings", requireDashboardApiAuth, async (req, res) => {
   return res.status(201).json({ mapping: created });
 });
 
-app.put("/v1/app-repo-mappings/:id", requireDashboardApiAuth, async (req, res) => {
+app.put("/v1/app-repo-mappings/:id", requireDashboardOrCliApiKey, async (req, res) => {
   const id = stringFromUnknown(req.params.id);
   if (!id) return res.status(400).json({ error: "Mapping id is required" });
 
@@ -584,7 +632,7 @@ app.put("/v1/app-repo-mappings/:id", requireDashboardApiAuth, async (req, res) =
   return res.json({ mapping: updated });
 });
 
-app.delete("/v1/app-repo-mappings/:id", requireDashboardApiAuth, async (req, res) => {
+app.delete("/v1/app-repo-mappings/:id", requireDashboardOrCliApiKey, async (req, res) => {
   const id = stringFromUnknown(req.params.id);
   if (!id) return res.status(400).json({ error: "Mapping id is required" });
   const deleted = await deleteAppRepoMapping(id);

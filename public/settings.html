@@ -120,6 +120,16 @@
             </div>
             <div class="row2">
               <label>
+                CLI API Key (for repo mapping auth)
+                <input name="cliApiKey" type="password" placeholder="Enter new API key (leave blank to keep current)" />
+              </label>
+              <label>
+                CLI API Key Status
+                <input id="cliApiKeyStatus" value="Not set" disabled />
+              </label>
+            </div>
+            <div class="row2">
+              <label>
                 Auto-fix Enabled
                 <select name="autoFixEnabled">
                   <option value="false">false</option>
@@ -298,6 +308,7 @@
       const storageProviderInput = document.getElementById("storageProvider");
       const mappingForm = document.getElementById("mappingForm");
       const settingsToast = document.getElementById("settingsToast");
+      const cliApiKeyStatus = document.getElementById("cliApiKeyStatus");
       const mappingsBody = document.getElementById("mappingsBody");
       const runsBody = document.getElementById("runsBody");
 
@@ -329,6 +340,10 @@
         const s = data.settings || {};
         field(settingsForm, "dashboardAuthEnabled").value = String(Boolean(s.dashboardAuthEnabled));
         field(settingsForm, "dashboardPassword").value = "";
+        field(settingsForm, "cliApiKey").value = "";
+        if (cliApiKeyStatus) {
+          cliApiKeyStatus.value = s.cliApiKeySet ? "Configured" : "Not set";
+        }
         field(settingsForm, "autoFixEnabled").value = String(Boolean(s.autoFixEnabled));
         field(settingsForm, "llmBaseUrl").value = s.llmBaseUrl || "";
         field(settingsForm, "llmApiKey").value = s.llmApiKey || "";
@@ -424,6 +439,7 @@
         const payload = {
           dashboardAuthEnabled: field(settingsForm, "dashboardAuthEnabled").value === "true",
           dashboardPassword: field(settingsForm, "dashboardPassword").value,
+          cliApiKey: field(settingsForm, "cliApiKey").value,
           autoFixEnabled: field(settingsForm, "autoFixEnabled").value === "true",
           llmBaseUrl: field(settingsForm, "llmBaseUrl").value.trim(),
           llmApiKey: field(settingsForm, "llmApiKey").value,

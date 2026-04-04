@@ -110,6 +110,7 @@ function mapSystemSettingsRow(row: {
   auto_fix_enabled: boolean;
   dashboard_auth_enabled: boolean;
   dashboard_password_hash: string | null;
+  cli_api_key_hash: string | null;
   storage_provider: "local" | "s3";
   s3_bucket: string | null;
   s3_region: string | null;
@@ -135,6 +136,8 @@ function mapSystemSettingsRow(row: {
     dashboardAuthEnabled: row.dashboard_auth_enabled,
     dashboardPasswordHash: row.dashboard_password_hash ?? undefined,
     dashboardPasswordSet: Boolean(row.dashboard_password_hash),
+    cliApiKeyHash: row.cli_api_key_hash ?? undefined,
+    cliApiKeySet: Boolean(row.cli_api_key_hash),
     storageProvider: row.storage_provider ?? "local",
     s3Bucket: row.s3_bucket ?? undefined,
     s3Region: row.s3_region ?? undefined,
@@ -353,6 +356,7 @@ export async function initStorage(): Promise<void> {
       auto_fix_enabled BOOLEAN NOT NULL DEFAULT FALSE,
       dashboard_auth_enabled BOOLEAN NOT NULL DEFAULT FALSE,
       dashboard_password_hash TEXT,
+      cli_api_key_hash TEXT,
       storage_provider TEXT NOT NULL DEFAULT 'local',
       s3_bucket TEXT,
       s3_region TEXT,
@@ -382,6 +386,11 @@ export async function initStorage(): Promise<void> {
   await pool.query(`
     ALTER TABLE system_settings
     ADD COLUMN IF NOT EXISTS dashboard_password_hash TEXT;
+  `);
+
+  await pool.query(`
+    ALTER TABLE system_settings
+    ADD COLUMN IF NOT EXISTS cli_api_key_hash TEXT;
   `);
 
   await pool.query(`
@@ -826,22 +835,23 @@ export async function updateSystemSettings(
         auto_fix_enabled = $1,
         dashboard_auth_enabled = $2,
         dashboard_password_hash = COALESCE($3, dashboard_password_hash),
-        storage_provider = $4,
-        s3_bucket = $5,
-        s3_region = $6,
-        s3_endpoint = $7,
-        s3_access_key_id = $8,
-        s3_secret_access_key = $9,
-        s3_prefix = $10,
-        s3_force_path_style = $11,
-        llm_base_url = $12,
-        llm_api_key = $13,
-        llm_model = $14,
-        github_token = $15,
-        git_user_name = $16,
-        git_user_email = $17,
-        default_base_branch = $18,
-        fix_branch_prefix = $19,
+        cli_api_key_hash = COALESCE($4, cli_api_key_hash),
+        storage_provider = $5,
+        s3_bucket = $6,
+        s3_region = $7,
+        s3_endpoint = $8,
+        s3_access_key_id = $9,
+        s3_secret_access_key = $10,
+        s3_prefix = $11,
+        s3_force_path_style = $12,
+        llm_base_url = $13,
+        llm_api_key = $14,
+        llm_model = $15,
+        github_token = $16,
+        git_user_name = $17,
+        git_user_email = $18,
+        default_base_branch = $19,
+        fix_branch_prefix = $20,
         updated_at = NOW()
       WHERE id = 'default'
       RETURNING *;
@@ -850,6 +860,7 @@ export async function updateSystemSettings(
       patch.autoFixEnabled,
       patch.dashboardAuthEnabled,
       patch.dashboardPasswordHash ?? null,
+      patch.cliApiKeyHash ?? null,
       patch.storageProvider ?? "local",
       patch.s3Bucket ?? null,
       patch.s3Region ?? null,

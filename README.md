@@ -164,6 +164,9 @@ Read automation settings.
 
 Update automation settings:
 
+- `dashboardAuthEnabled`
+- `dashboardPassword`
+- `cliApiKey` (for CLI repo mapping auth)
 - `autoFixEnabled`
 - `llmBaseUrl`
 - `llmApiKey`
@@ -186,6 +189,8 @@ Upsert mapping fields:
 - `repoUrl`
 - `baseBranch`
 - `isActive`
+
+Auth: dashboard session cookie or `x-crashforge-api-key` (also accepts `Authorization: Bearer <key>`).
 
 ### `PUT /v1/app-repo-mappings/:id`
 

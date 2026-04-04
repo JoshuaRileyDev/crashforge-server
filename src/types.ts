@@ -99,6 +99,8 @@ export interface SystemSettings {
   dashboardAuthEnabled: boolean;
   dashboardPasswordHash?: string;
   dashboardPasswordSet: boolean;
+  cliApiKeyHash?: string;
+  cliApiKeySet: boolean;
   storageProvider: "local" | "s3";
   s3Bucket?: string;
   s3Region?: string;
